@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     AI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     DB_PATH: str = "data/knowledge.db"
-    VECTOR_DIM: int = 768
+    VECTOR_DIM: int = 512  # 默认匹配本地 BGE-small-zh-v1.5（512 维）；OpenAI 用 1536，通义用 1024
 
     FILE_STORAGE_DIR: str = "data/files"
     MAX_FILE_SIZE: int = 20 * 1024 * 1024

@@ -8,13 +8,16 @@
 |------|------|
 | 📥 文档上传 | 支持 Markdown / PDF / Word / TXT / HTML，拖拽上传 |
 | 💾 双版本存储 | 原始文件保留保真 + Markdown 版本供 AI/搜索使用 |
-| 🔍 全文搜索 | SQLite FTS5，支持中文，结果高亮 |
+| 🔍 全文搜索 | SQLite FTS5 trigram 分词，中文子串匹配 + 结果高亮 |
 | 🤖 AI 对话 | 指定文档问答 + 知识库 RAG 跨库检索 |
 | 💬 流式输出 | SSE 逐字返回，体验丝滑 |
 | 🏷️ 标签管理 | 多标签分类 |
 | 📝 手动编辑 | 解析错了？直接手动修正 Markdown |
-| 🔄 版本历史 | 每次修改自动存档，可回退 |
-| 🗑️ 软删除 | 误删能恢复 |
+| 🔄 版本历史 | 每次修改自动存档，可预览、可回滚 |
+| 🗑️ 回收站 | 软删除 + 恢复 + 彻底清除 |
+| 📝 AI 自动摘要 | 上传后后台自动生成文档摘要 |
+| 💾 自动备份 | 启动时自动备份数据库+文件，保留 N 天，可手动触发 |
+| ⚙️ 设置热更新 | 在网页改 AI 配置即时生效，无需重启 |
 | 🔌 多模型兼容 | OpenAI / 通义千问 / DeepSeek 等 |
 
 ## 🛠️ 技术栈
@@ -47,25 +50,27 @@ cp .env.example .env
 ```
 
 ```env
-# OpenAI
+# DeepSeek（推荐，Embedding 用本地 BGE 模型，免费）
 AI_API_KEY=sk-xxx
-AI_BASE_URL=https://api.openai.com/v1
-AI_MODEL=gpt-4o-mini
-AI_EMBEDDING_MODEL=text-embedding-3-small
-VECTOR_DIM=1536
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-v4-flash
+AI_EMBEDDING_MODEL=local   # 本地 BGE-small 模型，无需 API Key
+VECTOR_DIM=512
+
+# OpenAI
+# AI_BASE_URL=https://api.openai.com/v1
+# AI_MODEL=gpt-4o-mini
+# AI_EMBEDDING_MODEL=text-embedding-3-small
+# VECTOR_DIM=1536
 
 # 通义千问
 # AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 # AI_MODEL=qwen-plus
 # AI_EMBEDDING_MODEL=text-embedding-v3
 # VECTOR_DIM=1024
-
-# DeepSeek
-# AI_BASE_URL=https://api.deepseek.com/v1
-# AI_MODEL=deepseek-chat
-# AI_EMBEDDING_MODEL=deepseek-embedding
-# VECTOR_DIM=1024
 ```
+
+> 💡 配置也可以在网页「设置」页修改，保存后即时生效，无需重启后端。
 
 ### 第三步：启动后端
 
@@ -102,28 +107,32 @@ cd 知识库\frontend; npm run dev
 ```
 知识库/
 ├── backend/                    # Python 后端
-│   ├── main.py                # FastAPI 入口
+│   ├── main.py                # FastAPI 入口（含启动自动备份）
 │   ├── config.py              # 配置读取
 │   ├── requirements.txt
 │   ├── api/                   # API 路由
-│   │   ├── documents.py       # 文档 CRUD
-│   │   ├── search.py          # 全文搜索
+│   │   ├── documents.py       # 文档 CRUD + 版本历史
+│   │   ├── search.py          # 全文搜索（FTS5 trigram）
 │   │   ├── chat.py            # AI 对话（SSE 流式）
-│   │   └── tags.py            # 标签管理
+│   │   ├── tags.py            # 标签管理
+│   │   ├── trash.py           # 回收站
+│   │   ├── system.py          # 设置读写 + 备份管理
+│   │   └── stats.py           # 统计概览
 │   ├── services/              # 业务服务
 │   │   ├── parser.py          # 文档解析（插件式）
 │   │   ├── chunker.py         # 语义切片
-│   │   ├── embedding.py       # Embedding 向量化
-│   │   ├── llm.py             # LLM 流式调用
-│   │   └── rag.py             # RAG 检索 + Prompt 组装
+│   │   ├── embedding.py       # Embedding 向量化（本地 BGE/API）
+│   │   ├── llm.py             # LLM 流式调用（支持热更新）
+│   │   ├── rag.py             # RAG 检索 + Prompt 组装
+│   │   └── backup.py          # 自动备份
 │   ├── db/                    # 数据层
-│   │   ├── database.py        # SQLAlchemy + sqlite-vec
+│   │   ├── database.py        # SQLAlchemy + sqlite-vec + FTS5
 │   │   ├── models.py          # ORM 模型
 │   │   └── schemas.py         # Pydantic Schema
 │   └── utils/                 # 工具函数
 ├── frontend/                   # Vue 3 前端
 │   ├── src/
-│   │   ├── views/             # 页面组件
+│   │   ├── views/             # 页面组件（含 Trash 回收站）
 │   │   ├── components/        # 可复用组件
 │   │   ├── api/               # 后端接口封装
 │   │   └── stores/            # Pinia 状态管理
@@ -131,7 +140,7 @@ cd 知识库\frontend; npm run dev
 ├── data/                       # 运行时数据（自动创建）
 │   ├── knowledge.db           # SQLite 数据库
 │   └── files/                 # 原始文件存储
-├── backup/                     # 自动备份目录
+├── backup/                     # 自动备份目录（启动时自动生成）
 ├── .env                        # AI 配置（不提交到 git）
 ├── .env.example                # 配置模板
 ├── .gitignore
@@ -154,6 +163,31 @@ cd 知识库\frontend; npm run dev
 | DELETE | `/api/documents/{id}` | 软删除 |
 | POST | `/api/documents/{id}/restore` | 恢复已删除 |
 | POST | `/api/documents/{id}/reparse` | 重新解析 |
+| POST | `/api/documents/{id}/reindex` | 重建向量索引 |
+| POST | `/api/documents/reindex-all` | 批量重建全部索引 |
+| POST | `/api/documents/create-text` | 在线新建 Markdown 文档 |
+| GET | `/api/documents/{id}/versions` | 版本历史列表 |
+| GET | `/api/documents/{id}/versions/{vid}` | 版本内容 |
+| POST | `/api/documents/{id}/versions/{vid}/restore` | 回滚到某版本 |
+
+### 回收站
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/trash` | 已删除文档列表 |
+| POST | `/api/trash/{id}/restore` | 恢复文档 |
+| DELETE | `/api/trash/{id}` | 彻底删除（含原始文件） |
+
+### 系统
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/settings` | 读取当前配置（API Key 打码） |
+| PUT | `/api/settings` | 保存配置到 .env 并热生效 |
+| POST | `/api/backup` | 立即备份 |
+| GET | `/api/backups` | 备份列表 |
+| DELETE | `/api/backups/{name}` | 删除备份 |
+| POST | `/api/stats/test-llm` | 测试 AI 连接 |
 
 ### 搜索
 
@@ -198,10 +232,12 @@ print(r.json())
 
 | 项目 | 说明 |
 |------|------|
-| AI API 未配置 | 上传和搜索正常，AI 对话会提示配置 API Key |
+| AI API 未配置 | 上传、搜索、备份正常；AI 对话会提示配置 API Key |
+| Embedding 未就绪 | 本地 BGE 模型首次使用需联网下载（约 100MB），可设置 `HF_ENDPOINT=https://hf-mirror.com` 加速，或使用 modelscope 缓存 |
 | PDF 是扫描件 | 无法提取文本，解析状态会标记为 `partial` 或 `failed` |
 | sqlite-vec 扩展 | Windows 下首次加载需要 sqlite-vec 扩展文件，已随包安装 |
-| 数据备份 | 整个 `data/` 文件夹（knowledge.db + files）复制走即可 |
+| FTS 中文搜索 | 使用 FTS5 trigram 分词器（SQLite ≥ 3.34），支持中文子串匹配；启动时自动迁移旧索引 |
+| 数据备份 | 启动时自动备份到 `backup/`，保留 `BACKUP_KEEP_DAYS` 天；也可在设置页手动备份 |
 | 文件大小限制 | 默认 20MB，在 `.env` 中修改 `MAX_FILE_SIZE` |
 
 ## 🛣️ 迭代路线
@@ -210,19 +246,26 @@ print(r.json())
 ✅ 第一阶段：能存能看
    └─ 文档上传 → 解析 → 存储 → 列表 → 预览 → 删除
 
-🚧 第二阶段：能问（AI 能力）
+✅ 第二阶段：能问（AI 能力）
    ├─ 向量化 + sqlite-vec 检索
    ├─ 指定文档 AI 问答（SSE 流式）
    ├─ RAG 跨库语义问答
    └─ 多轮对话 + 会话管理
 
-📋 第三阶段：好用
-   ├─ 全文搜索高亮
+✅ 第三阶段：好用
+   ├─ 全文搜索高亮（trigram 中文子串匹配）
    ├─ 标签系统
-   ├─ 版本历史 + 手动编辑
-   ├─ 自动备份
+   ├─ 版本历史 + 回滚
+   ├─ 回收站（恢复/彻底删除）
+   ├─ 自动备份（启动 + 手动，保留 N 天）
    ├─ AI 自动摘要
-   └─ 网页剪藏扩展
+   └─ 设置热更新（网页改配置即时生效）
+
+📋 后续规划
+   ├─ 网页剪藏扩展
+   ├─ 文档间双向链接/图谱
+   ├─ 全文搜索 + 向量检索混合排序
+   └─ 移动端适配
 ```
 
 ## 📄 License

@@ -67,5 +67,18 @@ class LLMService:
     async def close(self):
         await self._client.aclose()
 
+    def reload(self):
+        """配置变更后重建客户端（热更新，无需重启）"""
+        import httpx
+        self._client = httpx.AsyncClient(
+            base_url=settings.AI_BASE_URL,
+            headers={
+                "Authorization": f"Bearer {settings.AI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=120.0,
+        )
+        logger.info("LLM 客户端已重建（配置热更新）")
+
 
 llm_service = LLMService()

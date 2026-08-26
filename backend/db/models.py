@@ -21,8 +21,12 @@ class Document(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
-    versions: Mapped[list["DocumentVersion"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    chunks: Mapped[list["Chunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", order_by="Chunk.chunk_index"
+    )
+    versions: Mapped[list["DocumentVersion"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", order_by="DocumentVersion.id"
+    )
     tags: Mapped[list["Tag"]] = relationship(secondary="document_tags", back_populates="documents")
 
 
@@ -80,7 +84,9 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="Message.id"
+    )
 
 
 class Message(Base):

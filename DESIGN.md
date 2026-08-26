@@ -641,3 +641,33 @@ VECTOR_DIM=1024
 | 文件上传安全 | 路径穿越 / 恶意文件 | 白名单校验 + uuid 重命名 + 存前检测 MIME |
 | 数据丢失 | 灾难性 | 每日自动备份 + 软删除 + 版本历史 |
 | API Key 泄露 | 费用风险 | .env 管理 + 加入 .gitignore + 启动时日志脱敏 |
+
+---
+
+## 九、更新记录
+
+### v1.1（本次优化）
+
+**缺陷修复**
+- 文档列表/详情不再丢失标签（`_doc_to_response` 此前恒返回空标签）
+- 编辑文档内容后向量索引现在会正确重建（原条件在赋值后恒为 False）
+- 会话消息按 `id` 稳定排序，修复历史乱序
+- 「重新生成」不再重复插入用户消息
+- 全文搜索改为 FTS5 **trigram** 分词：中文子串匹配（原 unicode61 把整段中文当一个 token，段落中间的词搜不到）；1-2 字词走 LIKE 兜底；查询特殊字符安全净化
+- FTS 表启动时自动从 unicode61 迁移到 trigram 并回填
+- 向量表启动时校验维度与 `VECTOR_DIM` 一致，不一致自动重建（默认 512 匹配本地 BGE-small）
+- vec0 虚拟表改用原生 sqlite3 连接创建（aiosqlite 代理连接无法加载扩展）
+- Markdown 渲染接入 DOMPurify 净化，消除 XSS 风险
+
+**新增功能**
+- 回收站：列表 / 恢复 / 彻底删除（`/api/trash` + 前端页面）
+- 版本历史：列表 / 内容预览 / 一键回滚（前端弹窗）
+- 自动备份：启动时后台执行 + 设置页手动触发，保留 `BACKUP_KEEP_DAYS` 天（`services/backup.py`）
+- 设置页真实生效：`GET/PUT /api/settings` 读写 `.env` 并热更新 LLM 客户端，无需重启
+- AI 自动摘要：上传/编辑后后台生成文档摘要（`documents.summary`）
+- 搜索页点击结果直接打开文档查看器（路由 `?open=<id>`）
+
+**其他**
+- `embedding_available()` 统一判断本地/API 型 Embedding 可用性（本地 BGE 不再依赖 API Key）
+- 前端 API 封装整合（`src/api/index.js`），Vite vendor 分包
+- README / .env.example 同步更新（VECTOR_DIM=512、热更新说明等）

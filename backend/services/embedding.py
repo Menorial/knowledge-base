@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 _EMBED_TIMEOUT_SEC = 10
 
 
+def embedding_available() -> bool:
+    """本地 BGE 模型不需要 API Key；API 型 embedding 需要 Key"""
+    return settings.AI_EMBEDDING_MODEL.strip().lower() == "local" or bool(settings.AI_API_KEY)
+
+
 class EmbeddingService:
     def __init__(self):
         self._model = None

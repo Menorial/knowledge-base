@@ -7,6 +7,7 @@
         <router-link to="/documents" class="nav-item"><span class="nav-icon">📄</span><span>文档管理</span></router-link>
         <router-link to="/chat" class="nav-item"><span class="nav-icon">💬</span><span>AI 对话</span></router-link>
         <router-link to="/search" class="nav-item"><span class="nav-icon">🔍</span><span>全文搜索</span></router-link>
+        <router-link to="/trash" class="nav-item"><span class="nav-icon">🗑️</span><span>回收站</span></router-link>
         <router-link to="/settings" class="nav-item"><span class="nav-icon">⚙️</span><span>设置</span></router-link>
       </nav>
     </aside>

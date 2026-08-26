@@ -133,8 +133,12 @@
         <div style="display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
           <el-button size="small" @click="viewerMode = 'md'" :type="viewerMode === 'md' ? 'primary' : 'default'">Markdown</el-button>
           <el-button size="small" @click="viewerMode = 'edit'" :type="viewerMode === 'edit' ? 'primary' : 'default'">编辑</el-button>
+          <el-button size="small" @click="openVersions" :icon="Clock">历史版本</el-button>
           <div style="flex: 1;"></div>
           <el-button size="small" @click="downloadRaw" :disabled="!viewerDoc?.file_path">下载原文件</el-button>
+        </div>
+        <div v-if="viewerDoc?.summary" class="doc-summary">
+          <strong>📝 AI 摘要：</strong>{{ viewerDoc.summary }}
         </div>
         <div v-if="viewerMode === 'md'" class="markdown-body" v-html="renderedMd"></div>
         <div v-else-if="viewerMode === 'edit'" style="padding: 16px;">
@@ -146,16 +150,44 @@
         </div>
       </div>
     </el-dialog>
+
+    <el-dialog v-model="versionsVisible" title="📜 历史版本" width="640px">
+      <div v-if="versionsLoading" style="padding: 40px; text-align: center; color: #6b7280;">加载中...</div>
+      <div v-else-if="versions.length === 0" style="padding: 40px; text-align: center; color: #6b7280;">暂无历史版本</div>
+      <div v-else class="version-list">
+        <div v-for="v in versions" :key="v.id" class="version-item">
+          <div class="version-main" @click="previewVersion(v)">
+            <div class="version-title">
+              <span class="version-badge">v{{ v.id }}</span>
+              <span class="version-note">{{ v.version_note || '未命名版本' }}</span>
+            </div>
+            <div class="version-meta">
+              {{ formatTime(v.created_at) }} · {{ v.word_count }} 字
+              <span v-if="v.content_preview" class="version-preview">{{ v.content_preview }}</span>
+            </div>
+          </div>
+          <el-button size="small" type="primary" plain @click="restoreVersion(v)">回滚</el-button>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="versionsVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Upload, Loading, Refresh, EditPen, Edit } from '@element-plus/icons-vue'
+import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import highlight from 'highlight.js'
-import { documentsApi } from '@/api'
+import DOMPurify from 'dompurify'
+import { documentsApi, tagsApi } from '@/api'
+
+const route = useRoute()
+const router = useRouter()
 
 const md = new MarkdownIt({
   html: true,
@@ -170,6 +202,8 @@ const md = new MarkdownIt({
   breaks: true,
   linkify: true,
 })
+
+const renderSafe = (text) => DOMPurify.sanitize(md.render(text || ''))
 
 const documents = ref([])
 const total = ref(0)
@@ -197,8 +231,12 @@ const renamingId = ref(null)
 const renameValue = ref('')
 const renameInput = ref(null)
 
+const versionsVisible = ref(false)
+const versionsLoading = ref(false)
+const versions = ref([])
+
 const renderedMd = computed(() => {
-  return md.render(viewerDoc.value?.content_md || '')
+  return renderSafe(viewerDoc.value?.content_md || '')
 })
 
 function fileIcon(type) {
@@ -388,12 +426,7 @@ async function doCreate() {
   if (!createForm.value.title.trim()) { ElMessage.warning('请输入标题'); return }
   creating.value = true
   try {
-    const r = await fetch('/api/documents/create-text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(createForm.value),
-    })
-    if (!r.ok) { const e = await r.json(); throw new Error(e.detail || '创建失败') }
+    await documentsApi.createText(createForm.value)
     ElMessage.success('创建成功！正在后台建立索引...')
     createVisible.value = false
     createForm.value = { title: '', content: '' }
@@ -414,12 +447,7 @@ function openAddTag(doc) {
 
 async function addTagsToDoc(docId, names) {
   try {
-    const r = await fetch(`/api/tags/document/${docId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(names),
-    })
-    if (!r.ok) throw new Error('添加失败')
+    await tagsApi.addToDoc(docId, names)
     ElMessage.success(`已添加 ${names.length} 个标签`)
     loadList()
   } catch (e) { ElMessage.error(e.message) }
@@ -427,14 +455,69 @@ async function addTagsToDoc(docId, names) {
 
 async function removeTag(doc, tagName) {
   try {
-    const tr = await fetch('/api/tags')
-    const tags = await tr.json()
+    const tags = await tagsApi.list()
     const tag = tags.find(t => t.name === tagName)
     if (!tag) return
-    const r = await fetch(`/api/tags/document/${doc.id}/${tag.id}`, { method: 'DELETE' })
-    if (r.ok) loadList()
+    await tagsApi.removeFromDoc(doc.id, tag.id)
+    loadList()
   } catch (e) { ElMessage.error(e.message) }
 }
+
+async function openVersions() {
+  if (!viewerDoc.value) return
+  versionsVisible.value = true
+  versionsLoading.value = true
+  versions.value = []
+  try {
+    versions.value = await documentsApi.versions(viewerDoc.value.id)
+  } catch (e) {
+    ElMessage.error('加载版本失败')
+  } finally {
+    versionsLoading.value = false
+  }
+}
+
+async function previewVersion(v) {
+  try {
+    const data = await documentsApi.version(viewerDoc.value.id, v.id)
+    ElMessageBox.alert(
+      `<pre style="white-space:pre-wrap;font-size:12px;max-height:400px;overflow:auto;background:#f8fafc;padding:12px;border-radius:8px;margin:0">${escapeHtml(data.content_md || '')}</pre>`,
+      `版本 v${v.id} 内容预览（${v.version_note || ''}）`,
+      { dangerouslyUseHTMLString: true, customStyle: { width: '640px' } }
+    )
+  } catch (e) { ElMessage.error('加载版本内容失败') }
+}
+
+async function restoreVersion(v) {
+  try {
+    await ElMessageBox.confirm(`确定回滚到版本 v${v.id}？当前内容将保存为新版本。`, '确认回滚', { type: 'warning' })
+    await documentsApi.restoreVersion(viewerDoc.value.id, v.id)
+    ElMessage.success('已回滚')
+    versionsVisible.value = false
+    await loadPreview(viewerDoc.value.id)
+    loadList()
+  } catch (err) {
+    if (err !== 'cancel') ElMessage.error(err.message || '回滚失败')
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// 从搜索页跳转：?open=<doc_id> 直接打开文档
+watch(
+  () => route.query.open,
+  async (id) => {
+    if (!id) return
+    const docId = Number(id)
+    router.replace({ query: {} })
+    try {
+      const doc = await documentsApi.get(docId)
+      openViewer(doc)
+    } catch (e) { /* 文档可能已删除 */ }
+  }
+)
 
 onMounted(loadList)
 </script>
@@ -491,4 +574,46 @@ onMounted(loadList)
   background: #fff;
   min-width: 120px;
 }
+.doc-summary {
+  margin: 12px 16px;
+  padding: 10px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #1e40af;
+  line-height: 1.6;
+}
+.version-list { display: flex; flex-direction: column; gap: 8px; }
+.version-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.version-main { flex: 1; min-width: 0; cursor: pointer; }
+.version-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.version-badge {
+  background: #6366f1;
+  color: #fff;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.version-note { font-size: 14px; font-weight: 600; color: #0f172a; }
+.version-meta { font-size: 12px; color: #64748b; display: flex; flex-direction: column; gap: 4px; }
+.version-preview {
+  color: #94a3b8;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+.version-item:hover { border-color: #a5b4fc; background: #eef2ff; }
 </style>

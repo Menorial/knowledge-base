@@ -15,7 +15,7 @@ from backend.db.schemas import DocumentResponse, DocumentListResponse, DocumentP
 from backend.utils.security import validate_file, safe_save_filename, safe_store_path
 from backend.services.parser import parse_document, ParseError
 from backend.services.chunker import chunk_markdown
-from backend.services.embedding import embedding_service
+from backend.services.embedding import embedding_service, embedding_available
 from backend.services.vec_store import vec_store
 from backend.services.fts_sync import fts_upsert, fts_delete
 
@@ -24,6 +24,12 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 def _doc_to_response(doc: Document, tags: list[str] | None = None) -> DocumentResponse:
+    if tags is None:
+        # 仅在 tags 已加载（selectinload）时读取，避免在异步上下文外触发懒加载 IO
+        if "tags" in doc.__dict__ and doc.tags:
+            tags = [t.name for t in doc.tags]
+        else:
+            tags = []
     return DocumentResponse(
         id=doc.id,
         title=doc.title,
@@ -34,7 +40,7 @@ def _doc_to_response(doc: Document, tags: list[str] | None = None) -> DocumentRe
         parse_status=doc.parse_status,
         summary=doc.summary,
         word_count=doc.word_count or 0,
-        tags=tags if tags is not None else [],
+        tags=tags,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -79,6 +85,34 @@ async def _bg_vectorize(doc_id: int, content_md: str):
         logger.info(f"文档 {doc_id} 向量化完成, {len(chunks)} 个片段")
     except Exception as e:
         logger.error(f"向量化失败 {doc_id}: {e}", exc_info=True)
+
+    # 摘要生成独立于向量化，失败不影响主流程
+    await _bg_summarize(doc_id, content_md)
+
+
+async def _bg_summarize(doc_id: int, content_md: str):
+    """后台 AI 自动摘要（可选功能，未配置 API Key 时静默跳过）"""
+    try:
+        if not settings.AI_API_KEY:
+            return
+        from backend.services.llm import llm_service
+        preview = (content_md or "")[:4000]
+        if len(preview.strip()) < 50:
+            return
+        text = await llm_service.chat([
+            {"role": "system", "content": "你是文档摘要助手。请用不超过 80 字概括文档核心内容，直接输出摘要正文，不要任何前缀或解释。"},
+            {"role": "user", "content": preview},
+        ])
+        text = (text or "").strip().strip('"“”')
+        if text:
+            async with async_session() as session:
+                doc = await session.get(Document, doc_id)
+                if doc:
+                    doc.summary = text[:500]
+                    await session.commit()
+                    logger.info(f"文档 {doc_id} 自动摘要完成")
+    except Exception as e:
+        logger.warning(f"自动摘要失败 doc={doc_id}: {e}")
 
 
 async def _do_chunk_and_vectorize(session: AsyncSession, doc_id: int, content_md: str):
@@ -168,7 +202,7 @@ async def upload_document(
 
     fts_upsert(doc_id, title, md_content)
 
-    if md_content and parse_status == "success" and settings.AI_API_KEY:
+    if md_content and parse_status == "success" and embedding_available():
         asyncio.create_task(_bg_vectorize(doc_id, md_content))
 
     return _doc_to_response(doc)
@@ -266,6 +300,9 @@ async def update_document(
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
 
+    # 必须在赋值前记录内容是否变化，否则赋值后比较恒为 False，向量索引永远不会更新
+    content_changed = body.content_md is not None and body.content_md != doc.content_md
+
     if body.title is not None:
         doc.title = body.title
 
@@ -284,11 +321,12 @@ async def update_document(
 
     fts_upsert(doc.id, doc.title, doc.content_md)
 
-    if body.content_md is not None and body.content_md != doc.content_md and settings.AI_API_KEY:
+    if content_changed and embedding_available():
         try:
             await _do_chunk_and_vectorize(session, doc.id, body.content_md)
         except Exception as e:
             logger.error(f"更新后向量化失败 {doc.id}: {e}", exc_info=True)
+        asyncio.create_task(_bg_summarize(doc.id, body.content_md))
 
     result = await session.execute(
         select(Document).where(Document.id == doc_id).options(selectinload(Document.tags))
@@ -378,8 +416,8 @@ async def reparse_document(doc_id: int, session: AsyncSession = Depends(get_sess
 
 @router.post("/{doc_id}/reindex")
 async def reindex_document(doc_id: int, session: AsyncSession = Depends(get_session)):
-    if not settings.AI_API_KEY:
-        raise HTTPException(status_code=400, detail="AI_API_KEY 未配置")
+    if not embedding_available():
+        raise HTTPException(status_code=400, detail="未配置 Embedding（本地 BGE 或 API Key）")
 
     result = await session.execute(
         select(Document).where(Document.id == doc_id, Document.is_deleted == False)
@@ -402,8 +440,8 @@ async def reindex_document(doc_id: int, session: AsyncSession = Depends(get_sess
 
 @router.post("/reindex-all")
 async def reindex_all_documents(session: AsyncSession = Depends(get_session)):
-    if not settings.AI_API_KEY:
-        raise HTTPException(status_code=400, detail="AI_API_KEY 未配置")
+    if not embedding_available():
+        raise HTTPException(status_code=400, detail="未配置 Embedding（本地 BGE 或 API Key）")
 
     result = await session.execute(
         select(Document).where(Document.is_deleted == False, Document.content_md != None)
@@ -429,9 +467,6 @@ async def create_text_document(
     session: AsyncSession = Depends(get_session),
 ):
     """从纯文本创建文档（在线新建 Markdown 用）"""
-    import asyncio
-    from datetime import datetime as dt
-
     title = body.get("title", "未命名文档").strip()
     content = body.get("content", "")
 
@@ -462,7 +497,95 @@ async def create_text_document(
 
     fts_upsert(doc_id, title, content)
 
-    if content and settings.AI_API_KEY:
+    if content and embedding_available():
         asyncio.create_task(_bg_vectorize(doc_id, content))
 
     return _doc_to_response(doc)
+
+
+# ============ 版本历史 ============
+
+@router.get("/{doc_id}/versions")
+async def list_versions(doc_id: int, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(Document).where(Document.id == doc_id, Document.is_deleted == False)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    v_result = await session.execute(
+        select(DocumentVersion)
+        .where(DocumentVersion.document_id == doc_id)
+        .order_by(DocumentVersion.id.desc())
+    )
+    versions = v_result.scalars().all()
+    return [
+        {
+            "id": v.id,
+            "version_note": v.version_note,
+            "created_at": v.created_at,
+            "word_count": len(v.content_md or ""),
+            "content_preview": (v.content_md or "")[:200],
+        }
+        for v in versions
+    ]
+
+
+@router.get("/{doc_id}/versions/{version_id}")
+async def get_version(doc_id: int, version_id: int, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(DocumentVersion).where(
+            DocumentVersion.id == version_id,
+            DocumentVersion.document_id == doc_id,
+        )
+    )
+    version = result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    return {
+        "id": version.id,
+        "version_note": version.version_note,
+        "created_at": version.created_at,
+        "content_md": version.content_md or "",
+    }
+
+
+@router.post("/{doc_id}/versions/{version_id}/restore")
+async def restore_version(doc_id: int, version_id: int, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(Document).where(Document.id == doc_id, Document.is_deleted == False)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    v_result = await session.execute(
+        select(DocumentVersion).where(
+            DocumentVersion.id == version_id,
+            DocumentVersion.document_id == doc_id,
+        )
+    )
+    version = v_result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="版本不存在")
+
+    doc.content_md = version.content_md or ""
+    doc.word_count = len(doc.content_md)
+    doc.updated_at = datetime.utcnow()
+    session.add(DocumentVersion(
+        document_id=doc.id,
+        content_md=doc.content_md,
+        version_note=f"回滚到版本 #{version.id}",
+    ))
+    await session.commit()
+
+    fts_upsert(doc.id, doc.title, doc.content_md)
+
+    if embedding_available():
+        try:
+            await _do_chunk_and_vectorize(session, doc.id, doc.content_md)
+        except Exception as e:
+            logger.error(f"回滚后向量化失败 {doc.id}: {e}", exc_info=True)
+        asyncio.create_task(_bg_summarize(doc.id, doc.content_md))
+
+    return {"code": 0, "msg": "ok"}

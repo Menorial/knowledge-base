@@ -30,7 +30,17 @@ export const documentsApi = {
   reparse: (id) => request.post(`/documents/${id}/reparse`),
   reindex: (id) => request.post(`/documents/${id}/reindex`),
   reindexAll: () => request.post('/documents/reindex-all'),
+  createText: (data) => request.post('/documents/create-text', data),
+  versions: (id) => request.get(`/documents/${id}/versions`),
+  version: (id, versionId) => request.get(`/documents/${id}/versions/${versionId}`),
+  restoreVersion: (id, versionId) => request.post(`/documents/${id}/versions/${versionId}/restore`),
   rawUrl: (id) => `/api/documents/${id}/raw`,
+}
+
+export const trashApi = {
+  list: () => request.get('/trash'),
+  restore: (id) => request.post(`/trash/${id}/restore`),
+  purge: (id) => request.delete(`/trash/${id}`),
 }
 
 export const searchApi = {
@@ -53,4 +63,16 @@ export const chatApi = {
   getConversation: (id) => request.get(`/conversations/${id}`),
   deleteConversation: (id) => request.delete(`/conversations/${id}`),
   updateConversation: (id, data) => request.put(`/conversations/${id}`, data),
+  regenerate: (convId, msgId) =>
+    request.post(`/conversations/${convId}/regenerate/${msgId}`),
+  exportUrl: (convId) => `/api/conversations/${convId}/export`,
+}
+
+export const systemApi = {
+  getSettings: () => request.get('/settings'),
+  saveSettings: (data) => request.put('/settings', data),
+  backupNow: () => request.post('/backup'),
+  listBackups: () => request.get('/backups'),
+  deleteBackup: (name) => request.delete(`/backups/${encodeURIComponent(name)}`),
+  testLlm: () => request.post('/stats/test-llm'),
 }

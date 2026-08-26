@@ -101,9 +101,16 @@ class ChatRequest(BaseModel):
 class ChatRAGRequest(BaseModel):
     conversation_id: Optional[int] = None
     message: str
-    top_k: int = 5
+    top_k: int = Field(default=5, ge=1, le=20)
 
 
 class ChatDirectRequest(BaseModel):
     conversation_id: Optional[int] = None
     message: str
+
+
+class SettingsUpdate(BaseModel):
+    ai_base_url: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_embedding_model: Optional[str] = None
+    ai_api_key: Optional[str] = None  # 传空字符串表示清除

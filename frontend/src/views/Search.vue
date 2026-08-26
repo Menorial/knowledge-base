@@ -37,6 +37,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { searchApi } from '@/api'
 
 const query = ref('')
 const results = ref([])
@@ -52,8 +53,7 @@ async function doSearch() {
   hasSearched.value = true
   const t0 = Date.now()
   try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(query.value))
-    const data = await r.json()
+    const data = await searchApi.fulltext(query.value)
     results.value = data.results
     total.value = data.total
     elapsed.value = Date.now() - t0
@@ -65,8 +65,7 @@ async function doSearch() {
 }
 
 function openDoc(id) {
-  router.push('/documents')
-  localStorage.setItem('openDocId', id)
+  router.push({ path: '/documents', query: { open: id } })
 }
 </script>
 

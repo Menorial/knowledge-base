@@ -10,6 +10,7 @@ from backend.config import settings
 from backend.db.database import init_db
 from backend.api import documents, search, chat, tags
 from backend.api import stats
+from backend.api import system, trash
 
 
 logging.basicConfig(
@@ -26,8 +27,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"文件存储目录: {settings.file_storage_abs}")
     logger.info(f"AI 模型: {settings.AI_MODEL} | Embedding: {settings.AI_EMBEDDING_MODEL}")
 
+    # 启动时后台执行一次自动备份（不阻塞启动）
+    try:
+        from backend.services.backup import run_backup
+        threading.Thread(target=run_backup, daemon=True).start()
+    except Exception as e:
+        logger.warning(f"自动备份任务启动失败: {e}")
+
     # 后台预加载 embedding 模型（有 10 秒硬超时，不会卡启）
-    if settings.AI_API_KEY:
+    if settings.AI_API_KEY or settings.AI_EMBEDDING_MODEL.strip().lower() == "local":
         import concurrent.futures
         from backend.services.embedding import embedding_service
         def _try_load():
@@ -56,6 +64,8 @@ app.include_router(search.router)
 app.include_router(chat.router)
 app.include_router(tags.router)
 app.include_router(stats.router)
+app.include_router(system.router)
+app.include_router(trash.router)
 
 
 @app.get("/api/health")

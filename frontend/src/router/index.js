@@ -21,6 +21,11 @@ const routes = [
     component: () => import('@/views/Search.vue'),
   },
   {
+    path: '/trash',
+    name: 'Trash',
+    component: () => import('@/views/Trash.vue'),
+  },
+  {
     path: '/chat',
     name: 'Chat',
     component: () => import('@/views/Chat.vue'),

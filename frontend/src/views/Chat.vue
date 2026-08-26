@@ -158,6 +158,7 @@ import { ElMessage } from 'element-plus'
 import { Promotion, Delete, Plus, ArrowDown, Download } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import highlight from 'highlight.js'
+import DOMPurify from 'dompurify'
 import { chatApi, documentsApi } from '@/api'
 
 const md = new MarkdownIt({
@@ -193,7 +194,7 @@ const renameInput = ref(null)
 
 const expandedSources = reactive({})
 
-const renderMsg = (text) => md.render(text || '')
+const renderMsg = (text) => DOMPurify.sanitize(md.render(text || ''))
 
 function addCodeCopyButtons() {
   document.querySelectorAll('.chat-main pre:not(.copy-ready)').forEach(pre => {
@@ -374,7 +375,7 @@ async function copyMsg(text) {
 }
 
 function exportConv(convId) {
-  window.open(`/api/conversations/${convId}/export`, '_blank')
+  window.open(chatApi.exportUrl(convId), '_blank')
 }
 
 function startRename(conv) {

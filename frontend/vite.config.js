@@ -18,4 +18,15 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vue-vendor': ['vue', 'vue-router', 'pinia', 'axios'],
+          'element-plus': ['element-plus', '@element-plus/icons-vue'],
+          'markdown': ['markdown-it', 'highlight.js', 'dompurify'],
+        },
+      },
+    },
+  },
 })

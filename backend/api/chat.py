@@ -359,7 +359,5 @@ async def regenerate_message(conv_id: int, msg_id: int, session: AsyncSession = 
             for d in context_docs
         ] if context_docs else None
 
-    # 保存 user 消息（还没保存到新 session）
-    await _save_msg(conv_id, "user", last_user_msg.content)
-
+    # 用户消息已在原始发送时入库，且位于 target 之前未被删除，无需重复保存
     return await _stream_llm(messages, conv_id, sources_json, sources_list)
