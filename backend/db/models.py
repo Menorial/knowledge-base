@@ -3,7 +3,6 @@ from sqlalchemy import String, Text, Integer, DateTime, ForeignKey, Boolean, Uni
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
-
 class Document(Base):
     __tablename__ = "documents"
 
@@ -100,3 +99,26 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class DocumentLink(Base):
+    """文档间双向链接：source=auto 自动标题匹配 / syntax 显式 [[语法]]"""
+
+    __tablename__ = "document_links"
+    __table_args__ = (
+        UniqueConstraint("from_doc_id", "to_doc_id", name="uq_document_link"),
+        Index("ix_document_links_to", "to_doc_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_doc_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    to_doc_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(10), default="auto")  # auto | syntax
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    from_doc: Mapped["Document"] = relationship("Document", foreign_keys=[from_doc_id])
+    to_doc: Mapped["Document"] = relationship("Document", foreign_keys=[to_doc_id])

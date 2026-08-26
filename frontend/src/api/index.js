@@ -76,3 +76,8 @@ export const systemApi = {
   deleteBackup: (name) => request.delete(`/backups/${encodeURIComponent(name)}`),
   testLlm: () => request.post('/stats/test-llm'),
 }
+
+export const linksApi = {
+  docLinks: (id) => request.get(`/documents/${id}/links`),
+  graph: () => request.get('/graph'),
+}

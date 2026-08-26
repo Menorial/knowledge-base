@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.config import settings
 from backend.db.database import get_session, async_session
-from backend.db.models import Document, Chunk, DocumentVersion
+from backend.db.models import Document, Chunk, DocumentVersion, DocumentLink
 from backend.db.schemas import DocumentResponse, DocumentListResponse, DocumentPreviewResponse, DocumentUpdate
 from backend.utils.security import validate_file, safe_save_filename, safe_store_path
 from backend.services.parser import parse_document, ParseError
@@ -18,9 +18,21 @@ from backend.services.chunker import chunk_markdown
 from backend.services.embedding import embedding_service, embedding_available
 from backend.services.vec_store import vec_store
 from backend.services.fts_sync import fts_upsert, fts_delete
+from backend.services.links import rebuild_all_links
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+
+
+def _schedule_links_rebuild():
+    """后台重建双向链接（不影响主流程，失败仅记日志）"""
+    async def _run():
+        try:
+            async with async_session() as session:
+                await rebuild_all_links(session)
+        except Exception as e:
+            logger.error(f"链接重建失败: {e}", exc_info=True)
+    asyncio.create_task(_run())
 
 
 def _doc_to_response(doc: Document, tags: list[str] | None = None) -> DocumentResponse:
@@ -205,6 +217,8 @@ async def upload_document(
     if md_content and parse_status == "success" and embedding_available():
         asyncio.create_task(_bg_vectorize(doc_id, md_content))
 
+    _schedule_links_rebuild()
+
     return _doc_to_response(doc)
 
 
@@ -328,6 +342,9 @@ async def update_document(
             logger.error(f"更新后向量化失败 {doc.id}: {e}", exc_info=True)
         asyncio.create_task(_bg_summarize(doc.id, body.content_md))
 
+    if content_changed or body.title is not None:
+        _schedule_links_rebuild()
+
     result = await session.execute(
         select(Document).where(Document.id == doc_id).options(selectinload(Document.tags))
     )
@@ -350,6 +367,7 @@ async def delete_document(doc_id: int, session: AsyncSession = Depends(get_sessi
 
     fts_delete(doc_id)
     vec_store.delete_by_document(doc_id)
+    _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
 
@@ -410,6 +428,7 @@ async def reparse_document(doc_id: int, session: AsyncSession = Depends(get_sess
     await session.commit()
 
     fts_upsert(doc.id, doc.title, doc.content_md or "")
+    _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
 
@@ -500,7 +519,51 @@ async def create_text_document(
     if content and embedding_available():
         asyncio.create_task(_bg_vectorize(doc_id, content))
 
+    _schedule_links_rebuild()
+
     return _doc_to_response(doc)
+
+
+# ============ 双向链接 ============
+
+@router.get("/{doc_id}/links")
+async def get_document_links(doc_id: int, session: AsyncSession = Depends(get_session)):
+    """返回文档的双向链接：outgoing=本文指向谁，incoming=谁指向本文"""
+    result = await session.execute(
+        select(Document).where(Document.id == doc_id, Document.is_deleted == False)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    out_result = await session.execute(
+        select(DocumentLink, Document.title)
+        .join(Document, Document.id == DocumentLink.to_doc_id)
+        .where(
+            DocumentLink.from_doc_id == doc_id,
+            Document.is_deleted == False,
+        )
+        .order_by(DocumentLink.id)
+    )
+    outgoing = [
+        {"id": link.to_doc_id, "title": title, "source": link.source}
+        for link, title in out_result.all()
+    ]
+
+    in_result = await session.execute(
+        select(DocumentLink, Document.title)
+        .join(Document, Document.id == DocumentLink.from_doc_id)
+        .where(
+            DocumentLink.to_doc_id == doc_id,
+            Document.is_deleted == False,
+        )
+        .order_by(DocumentLink.id)
+    )
+    incoming = [
+        {"id": link.from_doc_id, "title": title, "source": link.source}
+        for link, title in in_result.all()
+    ]
+
+    return {"outgoing": outgoing, "incoming": incoming}
 
 
 # ============ 版本历史 ============
@@ -587,5 +650,7 @@ async def restore_version(doc_id: int, version_id: int, session: AsyncSession = 
         except Exception as e:
             logger.error(f"回滚后向量化失败 {doc.id}: {e}", exc_info=True)
         asyncio.create_task(_bg_summarize(doc.id, doc.content_md))
+
+    _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}

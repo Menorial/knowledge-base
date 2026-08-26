@@ -10,7 +10,7 @@ from backend.config import settings
 from backend.db.database import init_db
 from backend.api import documents, search, chat, tags
 from backend.api import stats
-from backend.api import system, trash
+from backend.api import system, trash, graph
 
 
 logging.basicConfig(
@@ -33,6 +33,23 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=run_backup, daemon=True).start()
     except Exception as e:
         logger.warning(f"自动备份任务启动失败: {e}")
+
+    # 启动时后台初始化双向链接（旧库升级后自动补建）
+    try:
+        import asyncio as _asyncio
+        from backend.db.database import async_session
+        from backend.services.links import rebuild_all_links
+
+        async def _init_links():
+            try:
+                async with async_session() as session:
+                    await rebuild_all_links(session)
+            except Exception as e:
+                logger.warning(f"启动链接初始化失败: {e}")
+
+        _asyncio.create_task(_init_links())
+    except Exception as e:
+        logger.warning(f"链接初始化任务启动失败: {e}")
 
     # 后台预加载 embedding 模型（有 10 秒硬超时，不会卡启）
     if settings.AI_API_KEY or settings.AI_EMBEDDING_MODEL.strip().lower() == "local":
@@ -66,6 +83,7 @@ app.include_router(tags.router)
 app.include_router(stats.router)
 app.include_router(system.router)
 app.include_router(trash.router)
+app.include_router(graph.router)
 
 
 @app.get("/api/health")

@@ -140,6 +140,23 @@
         <div v-if="viewerDoc?.summary" class="doc-summary">
           <strong>📝 AI 摘要：</strong>{{ viewerDoc.summary }}
         </div>
+        <div v-if="links.outgoing.length || links.incoming.length" class="doc-links">
+          <div v-if="links.outgoing.length" class="links-group">
+            <span class="links-label">🔗 本文引用</span>
+            <span v-for="l in links.outgoing" :key="'o' + l.id" class="link-chip"
+              :class="l.source" @click="switchViewer(l.id)" :title="'打开《' + l.title + '》'">
+              {{ l.title }}<el-icon class="link-open"><Right /></el-icon>
+            </span>
+          </div>
+          <div v-if="links.incoming.length" class="links-group">
+            <span class="links-label">🔙 被引用</span>
+            <span v-for="l in links.incoming" :key="'i' + l.id" class="link-chip"
+              :class="l.source" @click="switchViewer(l.id)" :title="'打开《' + l.title + '》'">
+              {{ l.title }}<el-icon class="link-open"><Right /></el-icon>
+            </span>
+          </div>
+          <div class="links-hint">🕸️ 链接由系统自动识别（正文出现其他文档标题），也可用 <code>[[文档标题]]</code> 显式指定</div>
+        </div>
         <div v-if="viewerMode === 'md'" class="markdown-body" v-html="renderedMd"></div>
         <div v-else-if="viewerMode === 'edit'" style="padding: 16px;">
           <el-input v-model="editContent" type="textarea" :rows="20" style="font-family: 'Fira Code', Consolas, monospace; font-size: 14px;" />
@@ -180,11 +197,11 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock } from '@element-plus/icons-vue'
+import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import highlight from 'highlight.js'
 import DOMPurify from 'dompurify'
-import { documentsApi, tagsApi } from '@/api'
+import { documentsApi, tagsApi, linksApi } from '@/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -234,6 +251,8 @@ const renameInput = ref(null)
 const versionsVisible = ref(false)
 const versionsLoading = ref(false)
 const versions = ref([])
+
+const links = ref({ outgoing: [], incoming: [] })
 
 const renderedMd = computed(() => {
   return renderSafe(viewerDoc.value?.content_md || '')
@@ -310,6 +329,27 @@ function openViewer(doc) {
   viewerMode.value = 'md'
   viewerVisible.value = true
   loadPreview(doc.id)
+  loadLinks(doc.id)
+}
+
+async function loadLinks(id) {
+  try {
+    links.value = await linksApi.docLinks(id)
+  } catch (e) {
+    links.value = { outgoing: [], incoming: [] }
+  }
+}
+
+async function switchViewer(id) {
+  try {
+    const doc = await documentsApi.get(id)
+    viewerDoc.value = doc
+    viewerMode.value = 'md'
+    loadPreview(doc.id)
+    loadLinks(doc.id)
+  } catch (e) {
+    ElMessage.error('无法打开关联文档')
+  }
 }
 
 async function loadPreview(id) {
@@ -334,6 +374,7 @@ async function saveEdit() {
     ElMessage.success('保存成功')
     viewerMode.value = 'md'
     await loadPreview(viewerDoc.value.id)
+    loadLinks(viewerDoc.value.id)
     loadList()
   } catch (err) {}
 }
@@ -343,6 +384,7 @@ function editDoc(doc) {
   viewerMode.value = 'edit'
   viewerVisible.value = true
   loadPreview(doc.id)
+  loadLinks(doc.id)
 }
 
 async function reparseDoc(doc) {
@@ -495,6 +537,7 @@ async function restoreVersion(v) {
     ElMessage.success('已回滚')
     versionsVisible.value = false
     await loadPreview(viewerDoc.value.id)
+    loadLinks(viewerDoc.value.id)
     loadList()
   } catch (err) {
     if (err !== 'cancel') ElMessage.error(err.message || '回滚失败')
@@ -616,4 +659,33 @@ onMounted(loadList)
   max-width: 420px;
 }
 .version-item:hover { border-color: #a5b4fc; background: #eef2ff; }
+.doc-links {
+  margin: 12px 16px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.links-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.links-label { font-size: 12px; color: #64748b; font-weight: 600; flex-shrink: 0; }
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+.link-chip.auto { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+.link-chip.syntax { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+.link-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(59,130,246,0.15); }
+.link-open { font-size: 10px; }
+.links-hint { font-size: 11px; color: #94a3b8; }
+.links-hint code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
 </style>

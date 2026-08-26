@@ -1,4 +1,5 @@
 """回收站：查看软删除文档、恢复、彻底删除"""
+import asyncio
 import logging
 from pathlib import Path
 
@@ -7,13 +8,24 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
-from backend.db.database import get_session
+from backend.db.database import get_session, async_session
 from backend.db.models import Document
 from backend.services.fts_sync import fts_delete, fts_upsert
 from backend.services.vec_store import vec_store
+from backend.services.links import rebuild_all_links
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/trash", tags=["trash"])
+
+
+def _schedule_links_rebuild():
+    async def _run():
+        try:
+            async with async_session() as session:
+                await rebuild_all_links(session)
+        except Exception as e:
+            logger.error(f"链接重建失败: {e}", exc_info=True)
+    asyncio.create_task(_run())
 
 
 @router.get("")
@@ -51,6 +63,7 @@ async def restore_document(doc_id: int, session: AsyncSession = Depends(get_sess
     await session.commit()
 
     fts_upsert(doc.id, doc.title, doc.content_md or "")
+    _schedule_links_rebuild()
     return {"code": 0, "msg": "ok"}
 
 
@@ -80,6 +93,7 @@ async def purge_document(doc_id: int, session: AsyncSession = Depends(get_sessio
     await session.execute(text("DELETE FROM document_versions WHERE document_id = :did"), {"did": doc_id})
     await session.execute(text("DELETE FROM document_tags WHERE document_id = :did"), {"did": doc_id})
     await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
+    await session.execute(text("DELETE FROM document_links WHERE from_doc_id = :did OR to_doc_id = :did"), {"did": doc_id})
     await session.delete(doc)
     await session.commit()
     return {"code": 0, "msg": "ok"}
