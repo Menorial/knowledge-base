@@ -95,6 +95,16 @@ npm run dev
 ### 一键启动（Windows PowerShell）
 
 ```powershell
+# 首次使用（自动建 venv + 装依赖 + 启动前后端）
+.\start.ps1
+
+# 之后日常启动
+.\start.ps1 -SkipInstall
+```
+
+也可以手动分两个终端启动：
+
+```powershell
 # 终端 1 — 后端
 cd 知识库; python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
