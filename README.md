@@ -94,25 +94,19 @@ npm run dev
 
 浏览器打开 `http://localhost:5173` 即可使用。
 
-### 一键启动（Windows PowerShell）
+### 手动启动（Windows，两个终端）
 
 ```powershell
-# 首次使用（自动建 venv + 装依赖 + 启动前后端）
-.\start.ps1
-
-# 之后日常启动
-.\start.ps1 -SkipInstall
-```
-
-也可以手动分两个终端启动：
-
-```powershell
-# 终端 1 — 后端
-cd 知识库; python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+# 终端 1 — 后端（用项目虚拟环境里的 Python，系统 Python 未装依赖）
+cd 知识库
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 终端 2 — 前端
-cd 知识库\frontend; npm run dev
+cd 知识库\frontend
+npm run dev
 ```
+
+> 提示：如果还没建虚拟环境，先执行 `python -m venv .venv`，再 `.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt`。
 
 ## 📁 项目结构
 
