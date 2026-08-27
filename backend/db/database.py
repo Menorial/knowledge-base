@@ -48,6 +48,14 @@ async def init_db():
         from . import models
         await conn.run_sync(Base.metadata.create_all)
 
+    # 启动时一次性设置 WAL（运行时连接不再执行 PRAGMA，避免锁竞争）
+    import sqlite3
+    _wal_conn = sqlite3.connect(str(settings.db_abs_path), timeout=30)
+    try:
+        _wal_conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        _wal_conn.close()
+
     await _init_fts_table()
     await _init_vec_table()
     await _verify_vec_dim()

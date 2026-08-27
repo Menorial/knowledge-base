@@ -43,6 +43,8 @@ export const trashApi = {
   list: () => request.get('/trash'),
   restore: (id) => request.post(`/trash/${id}/restore`),
   purge: (id) => request.delete(`/trash/${id}`),
+  batchRestore: (ids) => request.post('/trash/batch-restore', { ids }),
+  batchPurge: (ids) => request.post('/trash/batch-purge', { ids }),
 }
 
 export const searchApi = {
