@@ -26,6 +26,7 @@ export const documentsApi = {
   preview: (id) => request.get(`/documents/${id}/preview`),
   update: (id, data) => request.put(`/documents/${id}`, data),
   delete: (id) => request.delete(`/documents/${id}`),
+  batchDelete: (ids) => request.post('/documents/batch-delete', { ids }),
   restore: (id) => request.post(`/documents/${id}/restore`),
   reparse: (id) => request.post(`/documents/${id}/reparse`),
   reindex: (id) => request.post(`/documents/${id}/reindex`),

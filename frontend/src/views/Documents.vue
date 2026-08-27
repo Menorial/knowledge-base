@@ -36,6 +36,14 @@
         </div>
       </div>
 
+      <div v-if="selectedIds.length" class="batch-bar">
+        <el-checkbox :model-value="allSelected" @change="toggleSelectAll">全选本页</el-checkbox>
+        <span class="batch-count">已选 {{ selectedIds.length }} 篇</span>
+        <div style="flex: 1;"></div>
+        <el-button size="small" @click="selectedIds = []">取消选择</el-button>
+        <el-button size="small" type="danger" :icon="Delete" @click="openBatchDelete">删除所选</el-button>
+      </div>
+
       <div class="upload-zone" :class="{ dragover: isDragging }"
         @click="triggerUpload"
         @dragover.prevent="isDragging = true"
@@ -66,7 +74,9 @@
 
       <!-- 列表视图 -->
       <div v-else-if="viewMode === 'list'">
-        <div v-for="doc in documents" :key="doc.id" class="doc-list-item" @click="openViewer(doc)">
+        <div v-for="doc in documents" :key="doc.id" class="doc-list-item"
+          :class="{ selected: isSelected(doc.id) }" @click="openViewer(doc)">
+          <el-checkbox class="doc-check" :model-value="isSelected(doc.id)" @click.stop @change="toggleSelect(doc.id)" />
           <div class="doc-icon" :class="doc.file_type || 'md'">
             {{ fileIcon(doc.file_type) }}
           </div>
@@ -105,7 +115,9 @@
 
       <!-- 卡片视图 -->
       <div v-else class="doc-card-grid">
-        <div v-for="doc in documents" :key="doc.id" class="doc-card" @click="openViewer(doc)">
+        <div v-for="doc in documents" :key="doc.id" class="doc-card"
+          :class="{ selected: isSelected(doc.id) }" @click="openViewer(doc)">
+          <el-checkbox class="doc-card-check" :model-value="isSelected(doc.id)" @click.stop @change="toggleSelect(doc.id)" />
           <div class="doc-card-top">
             <div class="doc-icon" :class="doc.file_type || 'md'">{{ fileIcon(doc.file_type) }}</div>
             <span class="status-badge" :class="doc.parse_status">{{ statusLabel(doc.parse_status) }}</span>
@@ -190,6 +202,24 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="batchDeleteVisible" title="🗑️ 确认删除所选文档" width="540px">
+      <div style="font-size: 13px; color: var(--text-2); margin-bottom: 12px;">
+        即将删除以下 <strong style="color: var(--red);">{{ selectedIds.length }}</strong> 篇文档（软删除，可在回收站恢复）：
+      </div>
+      <div class="batch-delete-list">
+        <div v-for="doc in selectedDocs" :key="doc.id" class="batch-delete-item">
+          <span class="batch-delete-icon">{{ fileIcon(doc.file_type) }}</span>
+          <span class="batch-delete-title" :title="doc.title">{{ doc.title }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="batchDeleteVisible = false">取消</el-button>
+        <el-button type="danger" :loading="batchDeleting" @click="doBatchDelete">
+          确认删除 {{ selectedIds.length }} 篇
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="viewerVisible" :title="viewerDoc?.title" width="80%" class="viewer-modal" :close-on-click-modal="false">
       <div class="viewer-content" v-loading="viewerLoading">
         <div style="display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border);">
@@ -266,7 +296,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right, Link, Close } from '@element-plus/icons-vue'
+import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right, Link, Close, Delete } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import highlight from 'highlight.js'
 import DOMPurify from 'dompurify'
@@ -318,6 +348,50 @@ const createForm = ref({ title: '', content: '' })
 const clipVisible = ref(false)
 const clipping = ref(false)
 const clipForm = ref({ url: '', title: '', tagsText: '' })
+
+const selectedIds = ref([])
+const batchDeleteVisible = ref(false)
+const batchDeleting = ref(false)
+
+const selectedDocs = computed(() => documents.value.filter((d) => selectedIds.value.includes(d.id)))
+const allSelected = computed(() => documents.value.length > 0 && selectedIds.value.length === documents.value.length)
+
+function isSelected(id) {
+  return selectedIds.value.includes(id)
+}
+
+function toggleSelect(id) {
+  const idx = selectedIds.value.indexOf(id)
+  if (idx === -1) selectedIds.value.push(id)
+  else selectedIds.value.splice(idx, 1)
+}
+
+function toggleSelectAll(val) {
+  selectedIds.value = val ? documents.value.map((d) => d.id) : []
+}
+
+function openBatchDelete() {
+  if (!selectedIds.value.length) {
+    ElMessage.warning('请先勾选要删除的文档')
+    return
+  }
+  batchDeleteVisible.value = true
+}
+
+async function doBatchDelete() {
+  batchDeleting.value = true
+  try {
+    const data = await documentsApi.batchDelete(selectedIds.value)
+    ElMessage.success(`已删除 ${data.deleted} 篇文档（可在回收站恢复）`)
+    batchDeleteVisible.value = false
+    selectedIds.value = []
+    loadList()
+  } catch (e) {
+    ElMessage.error(e.message || '批量删除失败')
+  } finally {
+    batchDeleting.value = false
+  }
+}
 
 const BOOKMARKLET = "javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+document.documentElement.outerHTML;fetch('http://localhost:8000/api/documents/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,title:t,html:h})}).then(function(r){return r.json()}).then(function(d){if(d&&d.id){alert('✅ 已剪藏：《'+d.title+'》')}else{alert('❌ 剪藏失败：'+(d&&d.detail||'未知错误'))}}).catch(function(e){alert('❌ 连接知识库失败：'+e.message+'（请确认后端已启动 http://localhost:8000）')})})();"
 
@@ -803,6 +877,56 @@ watch(viewMode, (v) => localStorage.setItem('kb-doc-view', v))
   color: var(--accent-text);
 }
 
+/* 批量选择 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--accent-weak);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  animation: fadeIn 0.2s ease;
+}
+.batch-count { color: var(--accent-text); font-weight: 600; }
+.doc-check { margin-right: 6px; flex-shrink: 0; }
+.doc-list-item.selected { background: var(--accent-weak); }
+.doc-list-item.selected:hover { background: var(--accent-weak); }
+.doc-card-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+.doc-card:hover .doc-card-check { opacity: 1; }
+.doc-card.selected { border-color: var(--accent); box-shadow: var(--shadow-2); }
+.doc-card.selected .doc-card-check { opacity: 1; }
+.batch-delete-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-inset);
+}
+.batch-delete-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.batch-delete-item:last-child { border-bottom: none; }
+.batch-delete-icon { font-size: 15px; flex-shrink: 0; }
+.batch-delete-title {
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 卡片视图 */
 .doc-card-grid {
   display: grid;
@@ -819,6 +943,7 @@ watch(viewMode, (v) => localStorage.setItem('kb-doc-view', v))
   display: flex;
   flex-direction: column;
   gap: 10px;
+  position: relative;
   transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
   animation: fadeUp 0.3s ease;
 }

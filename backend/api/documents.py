@@ -495,6 +495,43 @@ async def reindex_all_documents(session: AsyncSession = Depends(get_session)):
     return {"code": 0, "msg": "ok", "documents": len(docs), "chunks": total_chunks}
 
 
+@router.post("/batch-delete")
+async def batch_delete_documents(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+):
+    """批量软删除文档（可进回收站恢复）"""
+    ids = body.get("ids") or []
+    if not ids:
+        raise HTTPException(status_code=400, detail="请选择要删除的文档")
+    ids = [int(i) for i in ids if str(i).strip().isdigit()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="无效的文档 ID")
+
+    result = await session.execute(
+        select(Document).where(Document.id.in_(ids), Document.is_deleted == False)
+    )
+    docs = result.scalars().all()
+    if not docs:
+        raise HTTPException(status_code=404, detail="所选文档不存在")
+
+    now = datetime.utcnow()
+    deleted_ids: list[int] = []
+    for doc in docs:
+        doc.is_deleted = True
+        doc.deleted_at = now
+        deleted_ids.append(doc.id)
+    await session.commit()
+
+    for doc_id in deleted_ids:
+        await fts_delete_async(doc_id)
+        await delete_by_document_async(doc_id)
+
+    _schedule_links_rebuild()
+
+    return {"code": 0, "msg": "ok", "deleted": len(deleted_ids)}
+
+
 @router.post("/create-text")
 async def create_text_document(
     body: dict,
