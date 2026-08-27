@@ -30,6 +30,10 @@
         <el-button :icon="Link" @click="openClipDialog">🌐 网页剪藏</el-button>
         <el-button :icon="EditPen" @click="openCreateDialog">📝 新建 Markdown</el-button>
         <el-button :icon="Refresh" :loading="reindexing" @click="reindexAll">一键重建全部索引</el-button>
+        <div class="view-switch">
+          <button class="view-btn" :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'">☰</button>
+          <button class="view-btn" :class="{ active: viewMode === 'card' }" title="卡片视图" @click="viewMode = 'card'">▦</button>
+        </div>
       </div>
 
       <div class="upload-zone" :class="{ dragover: isDragging }"
@@ -38,10 +42,10 @@
         @dragleave.prevent="isDragging = false"
         @drop.prevent="handleDrop">
         <div class="icon">📤</div>
-        <div style="font-size: 14px; color: #374151; margin-bottom: 4px;">
+        <div style="font-size: 14px; color: var(--text-2); margin-bottom: 4px;">
           点击或拖拽文件到此处上传
         </div>
-        <div style="font-size: 12px; color: #6b7280;">
+        <div style="font-size: 12px; color: var(--text-3);">
           支持 Markdown / PDF / Word / TXT / HTML，单个文件 ≤ 20MB
         </div>
         <input ref="fileInput" type="file" multiple hidden accept=".md,.txt,.pdf,.docx,.html"
@@ -50,17 +54,18 @@
     </div>
 
     <div class="card" style="margin-top: 16px;">
-      <div v-if="loading" style="padding: 60px; text-align: center; color: #6b7280;">
+      <div v-if="loading" style="padding: 60px; text-align: center; color: var(--text-3);">
         <el-icon class="is-loading" :size="32"><Loading /></el-icon>
         <div style="margin-top: 8px;">加载中...</div>
       </div>
 
-      <div v-else-if="documents.length === 0" style="padding: 60px; text-align: center; color: #6b7280;">
+      <div v-else-if="documents.length === 0" style="padding: 60px; text-align: center; color: var(--text-3);">
         <div style="font-size: 48px; margin-bottom: 12px;">📄</div>
         <div>还没有文档，上传第一个吧</div>
       </div>
 
-      <div v-else>
+      <!-- 列表视图 -->
+      <div v-else-if="viewMode === 'list'">
         <div v-for="doc in documents" :key="doc.id" class="doc-list-item" @click="openViewer(doc)">
           <div class="doc-icon" :class="doc.file_type || 'md'">
             {{ fileIcon(doc.file_type) }}
@@ -98,7 +103,31 @@
         </div>
       </div>
 
-      <div v-if="total > pageSize" style="padding: 16px 20px; text-align: center; border-top: 1px solid #f3f4f6;">
+      <!-- 卡片视图 -->
+      <div v-else class="doc-card-grid">
+        <div v-for="doc in documents" :key="doc.id" class="doc-card" @click="openViewer(doc)">
+          <div class="doc-card-top">
+            <div class="doc-icon" :class="doc.file_type || 'md'">{{ fileIcon(doc.file_type) }}</div>
+            <span class="status-badge" :class="doc.parse_status">{{ statusLabel(doc.parse_status) }}</span>
+          </div>
+          <div class="doc-card-title" :title="doc.title">{{ doc.title }}</div>
+          <div v-if="doc.tags && doc.tags.length" class="doc-card-tags">
+            <span class="doc-card-tag" v-for="t in doc.tags" :key="t" @click.stop @dblclick.stop>{{ t }}</span>
+          </div>
+          <div class="doc-card-meta">
+            <span>{{ formatSize(doc.file_size) }}</span>
+            <span>·</span>
+            <span>{{ formatTime(doc.created_at) }}</span>
+            <span v-if="doc.word_count" style="flex:1;text-align:right;">{{ doc.word_count }} 字</span>
+          </div>
+          <div class="doc-card-actions" @click.stop>
+            <el-button link type="primary" size="small" @click="editDoc(doc)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="deleteDoc(doc)">删除</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="total > pageSize" style="padding: 16px 20px; text-align: center; border-top: 1px solid var(--border);">
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="pageSize"
@@ -141,7 +170,7 @@
           <el-input v-model="clipForm.tagsText" placeholder="可选，空格分隔多个标签" />
         </el-form-item>
       </el-form>
-      <div style="font-size: 12px; color: #94a3b8; line-height: 1.7; margin-bottom: 8px;">
+      <div style="font-size: 12px; color: var(--text-3); line-height: 1.7; margin-bottom: 8px;">
         💡 后端会抓取网页正文并自动转为 Markdown 入库（支持搜索 / AI 问答 / 图谱）。
       </div>
       <el-alert type="warning" :closable="false">
@@ -163,7 +192,7 @@
 
     <el-dialog v-model="viewerVisible" :title="viewerDoc?.title" width="80%" class="viewer-modal" :close-on-click-modal="false">
       <div class="viewer-content" v-loading="viewerLoading">
-        <div style="display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
+        <div style="display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border);">
           <el-button size="small" @click="viewerMode = 'md'" :type="viewerMode === 'md' ? 'primary' : 'default'">Markdown</el-button>
           <el-button size="small" @click="viewerMode = 'edit'" :type="viewerMode === 'edit' ? 'primary' : 'default'">编辑</el-button>
           <el-button size="small" @click="openVersions" :icon="Clock">历史版本</el-button>
@@ -206,8 +235,8 @@
     </el-dialog>
 
     <el-dialog v-model="versionsVisible" title="📜 历史版本" width="640px">
-      <div v-if="versionsLoading" style="padding: 40px; text-align: center; color: #6b7280;">加载中...</div>
-      <div v-else-if="versions.length === 0" style="padding: 40px; text-align: center; color: #6b7280;">暂无历史版本</div>
+      <div v-if="versionsLoading" style="padding: 40px; text-align: center; color: var(--text-3);">加载中...</div>
+      <div v-else-if="versions.length === 0" style="padding: 40px; text-align: center; color: var(--text-3);">暂无历史版本</div>
       <div v-else class="version-list">
         <div v-for="v in versions" :key="v.id" class="version-item">
           <div class="version-main" @click="previewVersion(v)">
@@ -267,6 +296,7 @@ const searchQuery = ref('')
 const loading = ref(false)
 const isDragging = ref(false)
 const reindexing = ref(false)
+const viewMode = ref(localStorage.getItem('kb-doc-view') || 'list')
 
 const fileInput = ref(null)
 const uploadDialogVisible = ref(false)
@@ -600,7 +630,7 @@ async function previewVersion(v) {
   try {
     const data = await documentsApi.version(viewerDoc.value.id, v.id)
     ElMessageBox.alert(
-      `<pre style="white-space:pre-wrap;font-size:12px;max-height:400px;overflow:auto;background:#f8fafc;padding:12px;border-radius:8px;margin:0">${escapeHtml(data.content_md || '')}</pre>`,
+      `<pre style="white-space:pre-wrap;font-size:12px;max-height:400px;overflow:auto;background:var(--bg-inset);padding:12px;border-radius:8px;margin:0">${escapeHtml(data.content_md || '')}</pre>`,
       `版本 v${v.id} 内容预览（${v.version_note || ''}）`,
       { dangerouslyUseHTMLString: true, customStyle: { width: '640px' } }
     )
@@ -640,6 +670,8 @@ watch(
 )
 
 onMounted(loadList)
+
+watch(viewMode, (v) => localStorage.setItem('kb-doc-view', v))
 </script>
 
 <style>
@@ -648,17 +680,17 @@ onMounted(loadList)
 .add-tag-btn {
   display: inline-block;
   font-size: 11px;
-  color: #3b82f6;
+  color: var(--accent);
   padding: 0 6px;
   cursor: pointer;
-  border: 1px dashed #93c5fd;
+  border: 1px dashed var(--border-strong);
   border-radius: 4px;
   line-height: 1.4;
   transition: all 0.15s;
 }
 .add-tag-btn:hover {
-  background: #eff6ff;
-  border-color: #3b82f6;
+  background: var(--accent-weak);
+  border-color: var(--accent);
 }
 .doc-title {
   display: flex;
@@ -669,12 +701,12 @@ onMounted(loadList)
   cursor: text;
 }
 .doc-title-text:hover {
-  color: #3b82f6;
+  color: var(--accent);
 }
 .doc-rename-icon {
   opacity: 0;
   font-size: 14px;
-  color: #94a3b8;
+  color: var(--text-3);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -682,39 +714,134 @@ onMounted(loadList)
   opacity: 1;
 }
 .doc-rename-icon:hover {
-  color: #3b82f6;
+  color: var(--accent);
 }
 .doc-rename-input {
   font-size: 14px;
   font-weight: 600;
   padding: 2px 8px;
-  border: 1px solid #3b82f6;
+  border: 1px solid var(--accent);
   border-radius: 6px;
   outline: none;
-  background: #fff;
+  background: var(--bg-card);
+  color: var(--text-1);
   min-width: 120px;
 }
+
+/* 视图切换 */
+.view-switch {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.view-btn {
+  width: 34px;
+  height: 32px;
+  border: none;
+  background: var(--bg-card);
+  color: var(--text-3);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.view-btn + .view-btn { border-left: 1px solid var(--border); }
+.view-btn:hover { color: var(--accent); }
+.view-btn.active {
+  background: var(--accent-weak);
+  color: var(--accent-text);
+}
+
+/* 卡片视图 */
+.doc-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  padding: 18px;
+}
+.doc-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+  animation: fadeUp 0.3s ease;
+}
+.doc-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-2);
+  border-color: var(--accent);
+}
+.doc-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.doc-card-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--text-1);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 40px;
+}
+.doc-card-tags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+.doc-card-tag {
+  font-size: 11px;
+  color: var(--accent-text);
+  background: var(--accent-weak);
+  padding: 1px 8px;
+  border-radius: 8px;
+}
+.doc-card-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-3);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.doc-card-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.doc-card:hover .doc-card-actions { opacity: 1; }
+
 .doc-summary {
   margin: 12px 16px;
   padding: 10px 14px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  background: var(--accent-weak);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 13px;
-  color: #1e40af;
+  color: var(--accent-text);
   line-height: 1.6;
 }
 .doc-source {
   margin: 0 16px 12px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-2);
   display: flex;
   gap: 4px;
   align-items: center;
   flex-wrap: wrap;
 }
 .doc-source a {
-  color: #3b82f6;
+  color: var(--accent);
   text-decoration: none;
   word-break: break-all;
 }
@@ -726,43 +853,43 @@ onMounted(loadList)
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 .version-main { flex: 1; min-width: 0; cursor: pointer; }
 .version-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .version-badge {
-  background: #6366f1;
+  background: var(--accent);
   color: #fff;
   font-size: 11px;
   padding: 1px 8px;
   border-radius: 8px;
   flex-shrink: 0;
 }
-.version-note { font-size: 14px; font-weight: 600; color: #0f172a; }
-.version-meta { font-size: 12px; color: #64748b; display: flex; flex-direction: column; gap: 4px; }
+.version-note { font-size: 14px; font-weight: 600; color: var(--text-1); }
+.version-meta { font-size: 12px; color: var(--text-2); display: flex; flex-direction: column; gap: 4px; }
 .version-preview {
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 420px;
 }
-.version-item:hover { border-color: #a5b4fc; background: #eef2ff; }
+.version-item:hover { border-color: var(--accent); background: var(--accent-weak); }
 .doc-links {
   margin: 12px 16px;
   padding: 12px 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 .links-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.links-label { font-size: 12px; color: #64748b; font-weight: 600; flex-shrink: 0; }
+.links-label { font-size: 12px; color: var(--text-2); font-weight: 600; flex-shrink: 0; }
 .link-chip {
   display: inline-flex;
   align-items: center;
@@ -774,10 +901,10 @@ onMounted(loadList)
   transition: all 0.15s;
   border: 1px solid transparent;
 }
-.link-chip.auto { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
-.link-chip.syntax { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
-.link-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(59,130,246,0.15); }
+.link-chip.auto { background: var(--blue-weak); color: var(--blue); border-color: var(--border); }
+.link-chip.syntax { background: var(--green-weak); color: var(--green); border-color: var(--border); }
+.link-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow-1); }
 .link-open { font-size: 10px; }
-.links-hint { font-size: 11px; color: #94a3b8; }
-.links-hint code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+.links-hint { font-size: 11px; color: var(--text-3); }
+.links-hint code { background: var(--bg-active); padding: 1px 5px; border-radius: 4px; }
 </style>

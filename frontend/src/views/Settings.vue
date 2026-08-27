@@ -24,7 +24,7 @@
         </el-form-item>
         <el-form-item label="Embedding 模型">
           <el-input v-model="config.embeddingModel" placeholder="local / text-embedding-3-small" />
-          <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">本地 BGE 模型填 <code>local</code>（免费）；API 型填模型名并确保有 Key</div>
+          <div style="font-size: 12px; color: var(--text-3); margin-top: 4px;">本地 BGE 模型填 <code>local</code>（免费）；API 型填模型名并确保有 Key</div>
         </el-form-item>
 
         <el-form-item label="预设模板">
@@ -58,7 +58,7 @@
           <el-button size="small" type="danger" plain @click="deleteBackup(b)">删除</el-button>
         </div>
       </div>
-      <div v-else-if="!loadingBackups" style="color: #94a3b8; font-size: 13px;">暂无备份，点击「立即备份」创建第一份</div>
+      <div v-else-if="!loadingBackups" style="color: var(--text-3); font-size: 13px;">暂无备份，点击「立即备份」创建第一份</div>
 
       <el-divider />
 
@@ -245,10 +245,10 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 8px;
 }
-.backup-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-.backup-meta { font-size: 12px; color: #64748b; margin-top: 2px; }
+.backup-name { font-size: 13px; font-weight: 600; color: var(--text-1); }
+.backup-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; }
 </style>

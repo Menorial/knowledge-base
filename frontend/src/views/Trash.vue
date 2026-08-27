@@ -105,7 +105,7 @@ onMounted(load)
   align-items: center;
   gap: 14px;
   padding: 16px 20px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--border);
 }
 .trash-item:last-child { border-bottom: none; }
 .doc-icon {
@@ -113,13 +113,13 @@ onMounted(load)
   display: flex; align-items: center; justify-content: center;
   font-size: 20px; flex-shrink: 0;
 }
-.doc-icon.pdf { background: #fef2f2; color: #ef4444; }
-.doc-icon.docx { background: #eff6ff; color: #3b82f6; }
-.doc-icon.md { background: #f0fdf4; color: #22c55e; }
-.doc-icon.txt { background: #fefce8; color: #eab308; }
-.doc-icon.html { background: #fdf4ff; color: #a855f7; }
+.doc-icon.pdf { background: var(--red-weak); color: var(--red); }
+.doc-icon.docx { background: var(--blue-weak); color: var(--blue); }
+.doc-icon.md { background: var(--green-weak); color: var(--green); }
+.doc-icon.txt { background: var(--amber-weak); color: var(--amber); }
+.doc-icon.html { background: var(--purple-weak); color: var(--purple); }
 .trash-info { flex: 1; min-width: 0; }
-.trash-title { font-size: 14px; font-weight: 500; color: #1f2937; }
-.trash-meta { font-size: 12px; color: #6b7280; margin-top: 4px; display: flex; gap: 12px; }
+.trash-title { font-size: 14px; font-weight: 500; color: var(--text-1); }
+.trash-meta { font-size: 12px; color: var(--text-3); margin-top: 4px; display: flex; gap: 12px; }
 .trash-actions { flex-shrink: 0; }
 </style>

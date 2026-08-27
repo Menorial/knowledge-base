@@ -82,7 +82,7 @@ function buildGraph() {
   const svg = select(svgRef.value)
   const g = select(zoomRef.value)
 
-  const edgeColor = (source) => (source === 'syntax' ? '#10b981' : '#93c5fd')
+  const edgeColor = (source) => (source === 'syntax' ? 'var(--green)' : 'var(--blue)')
 
   // 节点数据：id、标题、度数（决定半径）
   const degree = new Map()
@@ -148,7 +148,7 @@ function buildGraph() {
   node
     .append('circle')
     .attr('r', (d) => 14 + Math.min(10, d.degree * 2))
-    .attr('fill', (d) => (d.degree > 0 ? '#6366f1' : '#cbd5e1'))
+    .attr('fill', (d) => (d.degree > 0 ? 'var(--accent)' : 'var(--border-strong)'))
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
 
@@ -201,11 +201,11 @@ function svgClick() {
 
 <style scoped>
 .graph-page { padding: 24px; }
-.graph-stats { display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: #64748b; }
+.graph-stats { display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: var(--text-2); }
 .graph-card {
   position: relative;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   height: calc(100vh - 170px);
   min-height: 480px;
@@ -221,7 +221,7 @@ function svgClick() {
 .graph-node { cursor: pointer; }
 .node-label {
   font-size: 11px;
-  fill: #475569;
+  fill: var(--text-2);
   pointer-events: none;
   user-select: none;
 }
@@ -231,14 +231,14 @@ function svgClick() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 14px;
   padding: 40px;
   text-align: center;
   gap: 8px;
 }
 .graph-empty code {
-  background: #f1f5f9;
+  background: var(--bg-hover);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -249,12 +249,12 @@ function svgClick() {
   display: flex;
   gap: 14px;
   align-items: center;
-  background: rgba(255,255,255,0.92);
-  border: 1px solid #e2e8f0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-2);
 }
 .dot {
   display: inline-block;
@@ -264,7 +264,7 @@ function svgClick() {
   margin-right: 4px;
   vertical-align: middle;
 }
-.dot.auto { background: #93c5fd; }
-.dot.syntax { background: #10b981; }
-.legend-hint { color: #94a3b8; }
+.dot.auto { background: var(--blue); }
+.dot.syntax { background: var(--green); }
+.legend-hint { color: var(--text-3); }
 </style>

@@ -201,7 +201,7 @@ function addCodeCopyButtons() {
     pre.classList.add('copy-ready')
     const btn = document.createElement('button')
     btn.textContent = '📋 复制'
-    btn.style.cssText = 'position:absolute;top:8px;right:8px;background:rgba(255,255,255,0.15);color:#e2e8f0;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;z-index:20;transition:background 0.15s'
+    btn.style.cssText = 'position:absolute;top:8px;right:8px;background:rgba(255,255,255,0.15);color:var(--border);border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;z-index:20;transition:background 0.15s'
     btn.onmouseenter = () => btn.style.background = 'rgba(255,255,255,0.3)'
     btn.onmouseleave = () => btn.style.background = 'rgba(255,255,255,0.15)'
     btn.onclick = async () => {
@@ -545,13 +545,13 @@ onMounted(async () => {
 .chat-layout {
   display: flex;
   height: 100%;
-  background: #f8fafc;
+  background: var(--bg-inset);
 }
 
 .chat-sidebar {
   width: 260px;
-  background: #fff;
-  border-right: 1px solid #e2e8f0;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -559,7 +559,7 @@ onMounted(async () => {
 
 .sidebar-header {
   padding: 16px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--bg-hover);
 }
 
 .new-conv-btn {
@@ -578,7 +578,7 @@ onMounted(async () => {
 .empty-tip {
   padding: 40px 16px;
   text-align: center;
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 13px;
 }
 
@@ -589,7 +589,7 @@ onMounted(async () => {
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
-  color: #334155;
+  color: var(--text-2);
   margin-bottom: 2px;
   transition: all 0.15s;
   white-space: nowrap;
@@ -597,12 +597,12 @@ onMounted(async () => {
 }
 
 .chat-session-item:hover {
-  background: #f1f5f9;
+  background: var(--bg-hover);
 }
 
 .chat-session-item.active {
-  background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
-  color: #1e40af;
+  background: linear-gradient(135deg, var(--accent-weak), var(--accent-weak));
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -614,13 +614,13 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  background: #f1f5f9;
+  background: var(--bg-hover);
   margin-right: 8px;
   flex-shrink: 0;
 }
-.conv-mode-badge.rag { background: #dbeafe; }
-.conv-mode-badge.direct { background: #fef3c7; }
-.conv-mode-badge.doc { background: #dcfce7; }
+.conv-mode-badge.rag { background: var(--blue-weak); }
+.conv-mode-badge.direct { background: var(--amber-weak); }
+.conv-mode-badge.doc { background: var(--green-weak); }
 
 .conv-title {
   flex: 1;
@@ -634,22 +634,22 @@ onMounted(async () => {
   flex: 1;
   font-size: 13px;
   padding: 4px 8px;
-  border: 1px solid #3b82f6;
+  border: 1px solid var(--accent);
   border-radius: 6px;
   outline: none;
-  background: #fff;
+  background: var(--bg-card);
   margin-right: 8px;
 }
 
 .conv-delete {
   opacity: 0;
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 14px;
   transition: all 0.15s;
   flex-shrink: 0;
 }
 .chat-session-item:hover .conv-delete { opacity: 1; }
-.conv-delete:hover { color: #ef4444; }
+.conv-delete:hover { color: var(--red); }
 
 .chat-main {
   flex: 1;
@@ -688,7 +688,7 @@ onMounted(async () => {
 
 .welcome-sub {
   margin: 0 0 40px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 15px;
 }
 
@@ -702,8 +702,8 @@ onMounted(async () => {
 
 .mode-card {
   width: 200px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 20px;
   cursor: pointer;
@@ -714,7 +714,7 @@ onMounted(async () => {
 .mode-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 12px 32px rgba(0,0,0,0.08);
-  border-color: #3b82f6;
+  border-color: var(--accent);
 }
 
 .mode-icon {
@@ -727,20 +727,20 @@ onMounted(async () => {
   font-size: 24px;
   margin: 0 auto 12px;
 }
-.mode-icon.rag { background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); }
-.mode-icon.direct { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); }
-.mode-icon.doc { background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); }
+.mode-icon.rag { background: var(--blue-weak); }
+.mode-icon.direct { background: var(--amber-weak); }
+.mode-icon.doc { background: var(--green-weak); }
 
 .mode-name {
   font-size: 15px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text-1);
   margin-bottom: 4px;
 }
 
 .mode-desc {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-3);
 }
 
 /* ===== 消息区 ===== */
@@ -777,29 +777,29 @@ onMounted(async () => {
   font-size: 20px;
 }
 .avatar.assistant {
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
   color: #fff;
   box-shadow: 0 4px 12px rgba(59,130,246,0.3);
 }
 .avatar.user {
-  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-  color: #334155;
+  background: linear-gradient(135deg, var(--bg-hover) 0%, var(--border) 100%);
+  color: var(--text-2);
 }
 
 .bubble {
   max-width: 70%;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 14px 18px;
   font-size: 14px;
   line-height: 1.75;
-  color: #1e293b;
+  color: var(--text-1);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 
 .chat-message.user .bubble {
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
   color: #fff;
   border-color: transparent;
   box-shadow: 0 4px 14px rgba(59,130,246,0.3);
@@ -807,7 +807,7 @@ onMounted(async () => {
 
 .cursor {
   animation: blink 1s step-end infinite;
-  color: #3b82f6;
+  color: var(--accent);
   font-weight: bold;
 }
 @keyframes blink { 50% { opacity: 0; } }
@@ -816,14 +816,14 @@ onMounted(async () => {
 .sources-list {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed var(--border);
 }
 .sources-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-2);
   cursor: pointer;
   user-select: none;
 }
@@ -839,8 +839,8 @@ onMounted(async () => {
   gap: 8px;
 }
 .source-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 12px;
@@ -850,16 +850,16 @@ onMounted(async () => {
 }
 .source-title {
   font-weight: 600;
-  color: #334155;
+  color: var(--text-2);
   margin-bottom: 2px;
 }
 .source-section {
-  color: #64748b;
+  color: var(--text-2);
   font-size: 11px;
   margin-bottom: 4px;
 }
 .source-snippet {
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 11px;
   line-height: 1.5;
   display: -webkit-box;
@@ -871,8 +871,8 @@ onMounted(async () => {
 /* ===== 输入区 ===== */
 .chat-input-area {
   padding: 16px 32px 24px;
-  background: #fff;
-  border-top: 1px solid #e2e8f0;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
 }
 
 .mode-switch {
@@ -888,20 +888,20 @@ onMounted(async () => {
   align-items: center;
   gap: 4px;
   padding: 6px 14px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 20px;
-  background: #f8fafc;
+  background: var(--bg-inset);
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-2);
   cursor: pointer;
   transition: all 0.15s;
 }
 .mode-btn:hover {
-  border-color: #3b82f6;
-  color: #3b82f6;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .mode-btn.active {
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
   color: #fff;
   border-color: transparent;
   box-shadow: 0 4px 10px rgba(59,130,246,0.3);
@@ -916,13 +916,13 @@ onMounted(async () => {
 .input-row :deep(.el-textarea__inner) {
   border-radius: 12px;
   padding: 12px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   font-size: 14px;
   line-height: 1.6;
   box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 .input-row :deep(.el-textarea__inner:focus) {
-  border-color: #3b82f6;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
 }
 
@@ -951,8 +951,8 @@ onMounted(async () => {
   font-family: 'Fira Code', Consolas, monospace;
 }
 .bubble :deep(pre) {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: var(--text-1);
+  color: var(--border);
   padding: 14px 16px;
   border-radius: 10px;
   overflow-x: auto;
@@ -964,12 +964,12 @@ onMounted(async () => {
   color: inherit;
 }
 .bubble :deep(blockquote) {
-  border-left: 4px solid #3b82f6;
-  background: #eff6ff;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-weak);
   padding: 8px 14px;
   margin: 0.8em 0;
   border-radius: 0 8px 8px 0;
-  color: #1e40af;
+  color: var(--accent-text);
 }
 .bubble :deep(table) {
   width: 100%;
@@ -977,12 +977,12 @@ onMounted(async () => {
   margin: 0.8em 0;
 }
 .bubble :deep(th), .bubble :deep(td) {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   padding: 6px 10px;
   text-align: left;
   font-size: 13px;
 }
-.bubble :deep(th) { background: #f8fafc; font-weight: 600; }
+.bubble :deep(th) { background: var(--bg-inset); font-weight: 600; }
 
 .chat-message.user .bubble :deep(code) {
   background: rgba(255,255,255,0.2);
@@ -1004,23 +1004,23 @@ onMounted(async () => {
 }
 .msg-action {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-3);
   cursor: pointer;
   padding: 2px 8px;
   border-radius: 4px;
   transition: all 0.15s;
 }
 .msg-action:hover {
-  color: #3b82f6;
-  background: #eff6ff;
+  color: var(--accent);
+  background: var(--accent-weak);
 }
 .conv-export {
   opacity: 0;
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 14px;
   transition: all 0.15s;
   flex-shrink: 0;
 }
 .chat-session-item:hover .conv-export { opacity: 1; }
-.conv-export:hover { color: #10b981; }
+.conv-export:hover { color: var(--green); }
 </style>
