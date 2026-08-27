@@ -17,6 +17,7 @@
 | 🗑️ 回收站 | 软删除 + 恢复 + 彻底清除 |
 | 🔗 双向链接 | 正文提到其他文档标题自动关联，`[[标题]]` 显式链接，互相可见 |
 | 🕸️ 知识图谱 | 文档关联网络可视化，可拖拽/缩放，点击直达文档 |
+| 🌐 网页剪藏 | 粘贴网址或一键书签剪藏网页，自动转 Markdown 入库 |
 | 📝 AI 自动摘要 | 上传后后台自动生成文档摘要 |
 | 💾 自动备份 | 启动时自动备份数据库+文件，保留 N 天，可手动触发 |
 | ⚙️ 设置热更新 | 在网页改 AI 配置即时生效，无需重启 |
@@ -156,6 +157,27 @@ npm run dev
 └── README.md
 ```
 
+## 🌐 网页剪藏
+
+两种方式把网页存进知识库：
+
+**方式 1：网页里剪藏**（推荐，随时用）
+
+在「文档管理」页点「🌐 网页剪藏」，粘贴网址即可（可自定义标题和标签）。
+
+**方式 2：书签小工具（Bookmarklet）**——在任意网页点一下书签就剪藏
+
+1. 浏览器收藏夹新建一个书签，名称随意（如 `剪藏`）；
+2. 编辑书签，把**网址（URL）**替换为下面这段代码（整段复制）：
+
+```javascript
+javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+document.documentElement.outerHTML;fetch('http://localhost:8000/api/documents/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,title:t,html:h})}).then(function(r){return r.json()}).then(function(d){if(d&&d.id){alert('✅ 已剪藏：《'+d.title+'》')}else{alert('❌ 剪藏失败：'+(d&&d.detail||'未知错误'))}}).catch(function(e){alert('❌ 连接知识库失败：'+e.message+'（请确认后端已启动 http://localhost:8000）')})})();
+```
+
+3. 打开任意网页，点击该书签 → 网页正文自动转为 Markdown 存入知识库（可搜索 / AI 问答 / 自动连图谱）。
+
+> 注意：剪藏要求知识库后端正在运行（`http://localhost:8000`），且浏览器能访问 localhost。
+
 ## 🔌 API 速查
 
 ### 文档
@@ -174,6 +196,7 @@ npm run dev
 | POST | `/api/documents/{id}/reindex` | 重建向量索引 |
 | POST | `/api/documents/reindex-all` | 批量重建全部索引 |
 | POST | `/api/documents/create-text` | 在线新建 Markdown 文档 |
+| POST | `/api/documents/clip` | 网页剪藏（URL 或 HTML） |
 | GET | `/api/documents/{id}/versions` | 版本历史列表 |
 | GET | `/api/documents/{id}/versions/{vid}` | 版本内容 |
 | POST | `/api/documents/{id}/versions/{vid}/restore` | 回滚到某版本 |
@@ -275,10 +298,10 @@ print(r.json())
    ├─ 自动备份（启动 + 手动，保留 N 天）
    ├─ AI 自动摘要
    ├─ 设置热更新（网页改配置即时生效）
-   └─ 双向链接 + 知识图谱
+   ├─ 双向链接 + 知识图谱
+   └─ 网页剪藏（URL 剪藏 + 一键书签）
 
 📋 后续规划
-   ├─ 网页剪藏扩展
    ├─ 全文搜索 + 向量检索混合排序
    └─ 移动端适配
 ```

@@ -11,13 +11,13 @@ from sqlalchemy.orm import selectinload
 from backend.config import settings
 from backend.db.database import get_session, async_session
 from backend.db.models import Document, Chunk, DocumentVersion, DocumentLink
-from backend.db.schemas import DocumentResponse, DocumentListResponse, DocumentPreviewResponse, DocumentUpdate
+from backend.db.schemas import DocumentResponse, DocumentListResponse, DocumentPreviewResponse, DocumentUpdate, ClipRequest
 from backend.utils.security import validate_file, safe_save_filename, safe_store_path
-from backend.services.parser import parse_document, ParseError
+from backend.services.parser import parse_document, ParseError, html_to_markdown
 from backend.services.chunker import chunk_markdown
 from backend.services.embedding import embedding_service, embedding_available
-from backend.services.vec_store import vec_store
-from backend.services.fts_sync import fts_upsert, fts_delete
+from backend.services.vec_store import delete_by_document_async, bulk_add_async
+from backend.services.fts_sync import fts_upsert_async, fts_delete_async
 from backend.services.links import rebuild_all_links
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ def _doc_to_response(doc: Document, tags: list[str] | None = None) -> DocumentRe
         parse_status=doc.parse_status,
         summary=doc.summary,
         word_count=doc.word_count or 0,
+        source_url=doc.source_url,
         tags=tags,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
@@ -62,7 +63,7 @@ async def _bg_vectorize(doc_id: int, content_md: str):
     """后台向量化：自己管理 session，上传接口可立即返回"""
     try:
         chunks = chunk_markdown(content_md)
-        vec_store.delete_by_document(doc_id)
+        await delete_by_document_async(doc_id)
 
         async with async_session() as session:
             await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
@@ -86,7 +87,7 @@ async def _bg_vectorize(doc_id: int, content_md: str):
                     chunk_ids.append(ck.id)
 
             embeddings = await embedding_service.batch_embed([c.content for c in chunks])
-            vec_store.bulk_add(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
+            await bulk_add_async(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
 
             # 更新文档状态
             doc = await session.get(Document, doc_id)
@@ -131,7 +132,7 @@ async def _do_chunk_and_vectorize(session: AsyncSession, doc_id: int, content_md
     """给 reparse/reindex 用的同步版本"""
     chunks = chunk_markdown(content_md)
 
-    vec_store.delete_by_document(doc_id)
+    await delete_by_document_async(doc_id)
     await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
     await session.commit()
 
@@ -153,7 +154,7 @@ async def _do_chunk_and_vectorize(session: AsyncSession, doc_id: int, content_md
             chunk_ids.append(ck.id)
 
     embeddings = await embedding_service.batch_embed([c.content for c in chunks])
-    vec_store.bulk_add(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
+    await bulk_add_async(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
 
     return len(chunks)
 
@@ -212,7 +213,7 @@ async def upload_document(
             version_note="初始版本",
         ))
 
-    fts_upsert(doc_id, title, md_content)
+    await fts_upsert_async(doc_id, title, md_content)
 
     if md_content and parse_status == "success" and embedding_available():
         asyncio.create_task(_bg_vectorize(doc_id, md_content))
@@ -280,6 +281,7 @@ async def preview_document(doc_id: int, session: AsyncSession = Depends(get_sess
         content_md=doc.content_md,
         parse_status=doc.parse_status,
         file_type=doc.file_type,
+        source_url=doc.source_url,
     )
 
 
@@ -333,7 +335,7 @@ async def update_document(
     await session.commit()
     await session.refresh(doc)
 
-    fts_upsert(doc.id, doc.title, doc.content_md)
+    await fts_upsert_async(doc.id, doc.title, doc.content_md)
 
     if content_changed and embedding_available():
         try:
@@ -365,8 +367,8 @@ async def delete_document(doc_id: int, session: AsyncSession = Depends(get_sessi
     doc.deleted_at = datetime.utcnow()
     await session.commit()
 
-    fts_delete(doc_id)
-    vec_store.delete_by_document(doc_id)
+    await fts_delete_async(doc_id)
+    await delete_by_document_async(doc_id)
     _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
@@ -385,7 +387,7 @@ async def restore_document(doc_id: int, session: AsyncSession = Depends(get_sess
     doc.deleted_at = None
     await session.commit()
 
-    fts_upsert(doc.id, doc.title, doc.content_md or "")
+    await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
 
     return {"code": 0, "msg": "ok"}
 
@@ -427,7 +429,7 @@ async def reparse_document(doc_id: int, session: AsyncSession = Depends(get_sess
 
     await session.commit()
 
-    fts_upsert(doc.id, doc.title, doc.content_md or "")
+    await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
     _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
@@ -449,7 +451,7 @@ async def reindex_document(doc_id: int, session: AsyncSession = Depends(get_sess
 
     try:
         cn = await _do_chunk_and_vectorize(session, doc.id, doc.content_md)
-        fts_upsert(doc.id, doc.title, doc.content_md)
+        await fts_upsert_async(doc.id, doc.title, doc.content_md)
     except Exception as e:
         logger.error(f"reindex 失败 doc={doc_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -472,7 +474,7 @@ async def reindex_all_documents(session: AsyncSession = Depends(get_session)):
         try:
             cn = await _do_chunk_and_vectorize(session, doc.id, doc.content_md or "")
             total_chunks += cn
-            fts_upsert(doc.id, doc.title, doc.content_md or "")
+            await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
             logger.info(f"文档 {doc.id} ({doc.title}) 索引完成, {cn} 个片段")
         except Exception as e:
             logger.error(f"文档 {doc.id} 索引失败: {e}")
@@ -514,7 +516,7 @@ async def create_text_document(
             version_note="在线创建",
         ))
 
-    fts_upsert(doc_id, title, content)
+    await fts_upsert_async(doc_id, title, content)
 
     if content and embedding_available():
         asyncio.create_task(_bg_vectorize(doc_id, content))
@@ -642,7 +644,7 @@ async def restore_version(doc_id: int, version_id: int, session: AsyncSession = 
     ))
     await session.commit()
 
-    fts_upsert(doc.id, doc.title, doc.content_md)
+    await fts_upsert_async(doc.id, doc.title, doc.content_md)
 
     if embedding_available():
         try:
@@ -654,3 +656,143 @@ async def restore_version(doc_id: int, version_id: int, session: AsyncSession = 
     _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
+
+
+# ============ 网页剪藏 ============
+
+_MAX_CLIP_BYTES = 5 * 1024 * 1024
+_CLIP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
+
+
+async def _fetch_webpage(url: str) -> tuple[str, str]:
+    """抓取网页，返回 (html_text, page_title)。限协议、限大小、带超时"""
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="仅支持 http/https 链接")
+
+    import httpx
+    import re
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=True,
+            headers={"User-Agent": _CLIP_UA},
+        ) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in resp.aiter_bytes():
+                    size += len(chunk)
+                    if size > _MAX_CLIP_BYTES:
+                        raise HTTPException(status_code=400, detail="网页过大（>5MB），拒绝剪藏")
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"网页抓取失败: {e}")
+
+    # 编码探测：优先 <meta charset>，其次 UTF-8
+    head = raw[:2048].decode("utf-8", errors="ignore")
+    charset_m = re.search(r'charset=["\']?([\w-]+)', head, re.I)
+    charset = charset_m.group(1) if charset_m else None
+    if charset:
+        try:
+            text = raw.decode(charset, errors="replace")
+        except LookupError:
+            text = raw.decode("utf-8", errors="replace")
+    else:
+        text = raw.decode("utf-8", errors="replace")
+
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+    page_title = re.sub(r"\s+", " ", title_m.group(1)).strip()[:200] if title_m else ""
+    return text, page_title
+
+
+@router.post("/clip")
+async def clip_webpage(
+    body: ClipRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """网页剪藏：服务端抓取 URL，或直接接收页面 HTML，转 Markdown 入库"""
+    if not body.url and not body.html:
+        raise HTTPException(status_code=400, detail="需要提供 url 或 html")
+
+    html_content = body.html
+    source_url = (body.url or "").strip()
+    title = (body.title or "").strip()
+
+    if not html_content:
+        html_content, page_title = await _fetch_webpage(source_url)
+        if not title:
+            title = page_title
+
+    if not html_content or not html_content.strip():
+        raise HTTPException(status_code=400, detail="网页内容为空，抓取失败")
+
+    try:
+        md_content = html_to_markdown(html_content)
+    except ParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not title:
+        title = source_url[:100] if source_url else "未命名剪藏"
+
+    doc = Document(
+        title=title[:500],
+        file_path=None,
+        file_type="clip",
+        file_size=len(html_content),
+        content_md=md_content,
+        parse_status="success" if md_content else "partial",
+        word_count=len(md_content),
+        source_url=source_url or None,
+    )
+
+    async with session.begin():
+        session.add(doc)
+        await session.flush()
+        doc_id = doc.id
+        session.add(DocumentVersion(
+            document_id=doc_id,
+            content_md=md_content,
+            version_note="网页剪藏",
+        ))
+
+    # 附加标签（在事务内显式加载 tags，避免懒加载）
+    if body.tags:
+        from backend.db.models import Tag
+        async with session.begin():
+            doc_result = await session.execute(
+                select(Document).where(Document.id == doc_id).options(selectinload(Document.tags))
+            )
+            doc = doc_result.scalar_one()
+            for tag_name in body.tags:
+                tag_name = tag_name.strip()
+                if not tag_name:
+                    continue
+                tag_result = await session.execute(select(Tag).where(Tag.name == tag_name))
+                tag = tag_result.scalar_one_or_none()
+                if not tag:
+                    tag = Tag(name=tag_name)
+                    session.add(tag)
+                if tag not in doc.tags:
+                    doc.tags.append(tag)
+                    tag.usage_count = (tag.usage_count or 0) + 1
+
+    await fts_upsert_async(doc_id, doc.title, md_content)
+
+    if md_content and embedding_available():
+        asyncio.create_task(_bg_vectorize(doc_id, md_content))
+
+    _schedule_links_rebuild()
+
+    result = await session.execute(
+        select(Document).where(Document.id == doc_id).options(selectinload(Document.tags))
+    )
+    doc = result.scalar_one()
+    return _doc_to_response(doc)

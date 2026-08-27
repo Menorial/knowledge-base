@@ -15,6 +15,7 @@ class Document(Base):
     parse_status: Mapped[str] = mapped_column(String(20), default="pending")
     summary: Mapped[str] = mapped_column(Text, nullable=True)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
+    source_url: Mapped[str] = mapped_column(String(1000), nullable=True)  # 网页剪藏来源
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

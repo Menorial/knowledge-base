@@ -2,7 +2,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .embedding import embedding_service
-from .vec_store import vec_store
+from .vec_store import search_async
 from ..db.models import Document, Chunk
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ async def retrieve_for_rag(session: AsyncSession, question: str, top_k: int = 5)
         logger.error(f"Embedding 失败: {e}")
         return []
 
-    search_results = vec_store.search(query_embedding, top_k=top_k)
+    search_results = await search_async(query_embedding, top_k=top_k)
     if not search_results:
         return []
 

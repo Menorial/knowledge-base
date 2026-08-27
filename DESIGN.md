@@ -688,3 +688,14 @@ VECTOR_DIM=1024
 - 文档查看器新增「关联文档」区：引用/被引用标签页，来源着色（自动=蓝、语法=绿），点击即可切换查看
 - 新增「知识图谱」页面 `/graph`：d3-force 力导向图，节点大小=连接数、边按来源着色、节点可拖拽、滚轮缩放、空白平移、点击节点直达文档
 - 侧边栏新增「🕸️ 知识图谱」入口
+
+### v1.3（网页剪藏）
+
+- `documents` 表新增 `source_url` 字段（启动自动迁移），记录剪藏来源
+- `POST /api/documents/clip`：两种输入
+  - `url`：服务端抓取（httpx 流式限 5MB、20s 超时、UA 伪装、编码探测 `<meta charset>` / UTF-8）
+  - `html`：直接接收页面 HTML（bookmarklet 用，绕开登录墙/抓取失败）
+  - 均走 `html_to_markdown`（从 HTMLParser 抽出复用）转 Markdown，file_type=clip
+  - 入库后自动触发：FTS 索引、后台向量化、双向链接重建、AI 摘要、可选标签
+- 前端：「文档管理」新增「🌐 网页剪藏」弹窗（URL/标题/标签）；查看器显示来源链接（新窗口打开）
+- 浏览器 Bookmarklet：任意网页点书签一键剪藏（README 附代码）

@@ -27,6 +27,7 @@
         >
           <el-button type="primary" :icon="Upload">上传文档</el-button>
         </el-upload>
+        <el-button :icon="Link" @click="openClipDialog">🌐 网页剪藏</el-button>
         <el-button :icon="EditPen" @click="openCreateDialog">📝 新建 Markdown</el-button>
         <el-button :icon="Refresh" :loading="reindexing" @click="reindexAll">一键重建全部索引</el-button>
       </div>
@@ -128,6 +129,28 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="clipVisible" title="🌐 网页剪藏" width="620px">
+      <el-form label-width="70px">
+        <el-form-item label="网页地址" required>
+          <el-input v-model="clipForm.url" placeholder="https://example.com/article" />
+        </el-form-item>
+        <el-form-item label="标题">
+          <el-input v-model="clipForm.title" placeholder="留空则自动取网页标题" />
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-input v-model="clipForm.tagsText" placeholder="可选，空格分隔多个标签" />
+        </el-form-item>
+      </el-form>
+      <div style="font-size: 12px; color: #94a3b8; line-height: 1.7;">
+        💡 后端会抓取网页正文并自动转为 Markdown 入库（支持搜索 / AI 问答 / 图谱）。
+        也可以安装书签小工具，在任意网页一键剪藏 —— 见 README 说明。
+      </div>
+      <template #footer>
+        <el-button @click="clipVisible = false">取消</el-button>
+        <el-button type="primary" @click="doClip" :loading="clipping">剪藏</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="viewerVisible" :title="viewerDoc?.title" width="80%" class="viewer-modal" :close-on-click-modal="false">
       <div class="viewer-content" v-loading="viewerLoading">
         <div style="display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
@@ -139,6 +162,10 @@
         </div>
         <div v-if="viewerDoc?.summary" class="doc-summary">
           <strong>📝 AI 摘要：</strong>{{ viewerDoc.summary }}
+        </div>
+        <div v-if="viewerDoc?.source_url" class="doc-source">
+          <span>🌐 来源：</span>
+          <a :href="viewerDoc.source_url" target="_blank" rel="noopener noreferrer">{{ viewerDoc.source_url }}</a>
         </div>
         <div v-if="links.outgoing.length || links.incoming.length" class="doc-links">
           <div v-if="links.outgoing.length" class="links-group">
@@ -197,7 +224,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right } from '@element-plus/icons-vue'
+import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right, Link } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import highlight from 'highlight.js'
 import DOMPurify from 'dompurify'
@@ -243,6 +270,10 @@ const editContent = ref('')
 const createVisible = ref(false)
 const creating = ref(false)
 const createForm = ref({ title: '', content: '' })
+
+const clipVisible = ref(false)
+const clipping = ref(false)
+const clipForm = ref({ url: '', title: '', tagsText: '' })
 
 const renamingId = ref(null)
 const renameValue = ref('')
@@ -480,6 +511,31 @@ async function doCreate() {
   }
 }
 
+function openClipDialog() {
+  clipForm.value = { url: '', title: '', tagsText: '' }
+  clipVisible.value = true
+}
+
+async function doClip() {
+  const url = clipForm.value.url.trim()
+  if (!url) { ElMessage.warning('请输入网页地址'); return }
+  clipping.value = true
+  try {
+    const data = await documentsApi.clip({
+      url,
+      title: clipForm.value.title.trim() || undefined,
+      tags: clipForm.value.tagsText.trim() ? clipForm.value.tagsText.trim().split(/\s+/) : [],
+    })
+    ElMessage.success(`剪藏成功：《${data.title}》`)
+    clipVisible.value = false
+    loadList()
+  } catch (e) {
+    ElMessage.error(e.message || '剪藏失败')
+  } finally {
+    clipping.value = false
+  }
+}
+
 function openAddTag(doc) {
   const name = prompt('输入标签名（空格分隔可添加多个）：')
   if (!name || !name.trim()) return
@@ -627,6 +683,21 @@ onMounted(loadList)
   color: #1e40af;
   line-height: 1.6;
 }
+.doc-source {
+  margin: 0 16px 12px;
+  font-size: 12px;
+  color: #64748b;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.doc-source a {
+  color: #3b82f6;
+  text-decoration: none;
+  word-break: break-all;
+}
+.doc-source a:hover { text-decoration: underline; }
 .version-list { display: flex; flex-direction: column; gap: 8px; }
 .version-item {
   display: flex;

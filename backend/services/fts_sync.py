@@ -1,10 +1,12 @@
+import asyncio
 import sqlite3
 import sqlite_vec
 from backend.config import settings
 
 
 def _conn() -> sqlite3.Connection:
-    c = sqlite3.connect(str(settings.db_abs_path))
+    # 长超时：避免与其他写事务争锁时立即报 "database is locked"
+    c = sqlite3.connect(str(settings.db_abs_path), timeout=30)
     c.enable_load_extension(True)
     sqlite_vec.load(c)
     return c
@@ -46,3 +48,13 @@ def fts_rebuild_all():
         conn.commit()
     finally:
         conn.close()
+
+
+# ---- 异步包装：把同步 sqlite3 调用移出事件循环，避免阻塞/死锁 ----
+
+async def fts_upsert_async(doc_id: int, title: str, content_md: str):
+    await asyncio.to_thread(fts_upsert, doc_id, title, content_md)
+
+
+async def fts_delete_async(doc_id: int):
+    await asyncio.to_thread(fts_delete, doc_id)

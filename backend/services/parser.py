@@ -100,19 +100,24 @@ class DocxParser(BaseParser):
         return "\n".join(parts)
 
 
+def html_to_markdown(html_content: str) -> str:
+    """HTML → Markdown（网页剪藏与 HTMLParser 共用）"""
+    try:
+        import html2text
+    except ImportError:
+        raise ParseError("html2text 未安装，请运行 pip install html2text")
+
+    h = html2text.HTML2Text()
+    h.ignore_links = False
+    h.ignore_images = False
+    h.body_width = 0
+    return h.handle(html_content).strip()
+
+
 class HTMLParser(BaseParser):
     def parse(self, file_path: str) -> str:
-        try:
-            import html2text
-        except ImportError:
-            raise ParseError("html2text 未安装，请运行 pip install html2text")
-
         html_content = Path(file_path).read_text(encoding="utf-8", errors="ignore")
-        h = html2text.HTML2Text()
-        h.ignore_links = False
-        h.ignore_images = False
-        h.body_width = 0
-        return h.handle(html_content).strip()
+        return html_to_markdown(html_content)
 
 
 PARSERS: dict[str, BaseParser] = {

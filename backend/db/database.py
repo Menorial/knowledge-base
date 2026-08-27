@@ -52,6 +52,17 @@ async def init_db():
     await _init_vec_table()
     await _verify_vec_dim()
     await _migrate_add_mode_column()
+    await _migrate_add_source_url()
+
+
+async def _migrate_add_source_url():
+    """旧库补 documents.source_url 列（网页剪藏）"""
+    async with engine.begin() as conn:
+        from sqlalchemy import text
+        try:
+            await conn.execute(text("SELECT source_url FROM documents LIMIT 1"))
+        except Exception:
+            await conn.execute(text("ALTER TABLE documents ADD COLUMN source_url VARCHAR(1000)"))
 
 
 async def _verify_vec_dim():

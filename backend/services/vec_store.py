@@ -1,3 +1,4 @@
+import asyncio
 import struct
 import sqlite3
 import sqlite_vec
@@ -6,7 +7,8 @@ from backend.config import settings
 
 
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(settings.db_abs_path))
+    # 长超时：避免与其他写事务争锁时立即报 "database is locked"
+    conn = sqlite3.connect(str(settings.db_abs_path), timeout=30)
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -64,3 +66,17 @@ class VecStore:
 
 
 vec_store = VecStore()
+
+
+# ---- 异步包装：把同步 sqlite3 调用移出事件循环，避免阻塞/死锁 ----
+
+async def delete_by_document_async(document_id: int):
+    await asyncio.to_thread(vec_store.delete_by_document, document_id)
+
+
+async def bulk_add_async(items: list[tuple[int, int, list[float]]]):
+    await asyncio.to_thread(vec_store.bulk_add, items)
+
+
+async def search_async(query_embedding: list[float], top_k: int = 5) -> list[dict]:
+    return await asyncio.to_thread(vec_store.search, query_embedding, top_k)

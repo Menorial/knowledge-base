@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.db.database import get_session, async_session
 from backend.db.models import Document
-from backend.services.fts_sync import fts_delete, fts_upsert
-from backend.services.vec_store import vec_store
+from backend.services.fts_sync import fts_delete_async, fts_upsert_async
+from backend.services.vec_store import delete_by_document_async
 from backend.services.links import rebuild_all_links
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ async def restore_document(doc_id: int, session: AsyncSession = Depends(get_sess
     doc.deleted_at = None
     await session.commit()
 
-    fts_upsert(doc.id, doc.title, doc.content_md or "")
+    await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
     _schedule_links_rebuild()
     return {"code": 0, "msg": "ok"}
 
@@ -86,8 +86,8 @@ async def purge_document(doc_id: int, session: AsyncSession = Depends(get_sessio
         except Exception as e:
             logger.error(f"删除原始文件失败 {full_path}: {e}")
 
-    fts_delete(doc_id)
-    vec_store.delete_by_document(doc_id)
+    await fts_delete_async(doc_id)
+    await delete_by_document_async(doc_id)
 
     # 显式清理关联数据（外键已开启，双保险）
     await session.execute(text("DELETE FROM document_versions WHERE document_id = :did"), {"did": doc_id})

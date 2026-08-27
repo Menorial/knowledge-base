@@ -31,6 +31,7 @@ export const documentsApi = {
   reindex: (id) => request.post(`/documents/${id}/reindex`),
   reindexAll: () => request.post('/documents/reindex-all'),
   createText: (data) => request.post('/documents/create-text', data),
+  clip: (data) => request.post('/documents/clip', data),
   versions: (id) => request.get(`/documents/${id}/versions`),
   version: (id, versionId) => request.get(`/documents/${id}/versions/${versionId}`),
   restoreVersion: (id, versionId) => request.post(`/documents/${id}/versions/${versionId}/restore`),

@@ -22,6 +22,7 @@ class DocumentResponse(BaseModel):
     parse_status: str = "pending"
     summary: Optional[str] = None
     word_count: int = 0
+    source_url: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -40,6 +41,14 @@ class DocumentPreviewResponse(BaseModel):
     content_md: Optional[str] = None
     parse_status: str
     file_type: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class ClipRequest(BaseModel):
+    url: Optional[str] = None          # 服务端抓取的网页地址
+    html: Optional[str] = None         # 直接提供的网页 HTML（bookmarklet 用）
+    title: Optional[str] = None        # 标题（缺省取网页 <title>）
+    tags: List[str] = Field(default_factory=list)
 
 
 class TagResponse(BaseModel):
