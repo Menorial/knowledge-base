@@ -71,14 +71,17 @@
             {{ fileIcon(doc.file_type) }}
           </div>
           <div class="doc-info">
-            <div class="doc-title">
-              <template v-if="renamingId === doc.id">
-                <input ref="renameInput" v-model="renameValue" class="doc-rename-input" @click.stop @blur="commitRename" @keyup.enter="commitRename" @keyup.esc="cancelRename" @mousedown.stop />
-              </template>
-              <template v-else>
-                <span class="doc-title-text" @dblclick.stop="startRename(doc)" :title="'双击重命名：' + doc.title">{{ doc.title }}</span>
-              </template>
-              <el-icon class="doc-rename-icon" @click.stop="startRename(doc)" title="重命名"><Edit /></el-icon>
+            <div class="doc-title-row">
+              <div class="doc-title">
+                <template v-if="renamingId === doc.id">
+                  <input ref="renameInput" v-model="renameValue" class="doc-rename-input" @click.stop @blur="commitRename" @keyup.enter="commitRename" @keyup.esc="cancelRename" @mousedown.stop />
+                </template>
+                <template v-else>
+                  <span class="doc-title-text" @dblclick.stop="startRename(doc)" :title="'双击重命名：' + doc.title">{{ doc.title }}</span>
+                </template>
+                <el-icon class="doc-rename-icon" @click.stop="startRename(doc)" title="重命名"><Edit /></el-icon>
+              </div>
+              <span class="status-badge" :class="doc.parse_status">{{ statusLabel(doc.parse_status) }}</span>
             </div>
             <div class="doc-meta">
               <span>{{ formatSize(doc.file_size) }}</span>
@@ -89,18 +92,13 @@
                 </span>
               </span>
               <span class="add-tag-btn" @click.stop="openAddTag(doc)" title="添加标签">+ 标签</span>
+              <div class="doc-actions-inline" @click.stop>
+                <el-button link type="primary" size="small" @click="editDoc(doc)">编辑</el-button>
+                <el-button v-if="doc.file_path" link type="primary" size="small" @click="reparseDoc(doc)">重新解析</el-button>
+                <el-button link type="warning" size="small" @click="reindexDoc(doc)">重建索引</el-button>
+                <el-button link type="danger" size="small" @click="deleteDoc(doc)">删除</el-button>
+              </div>
             </div>
-          </div>
-          <div class="doc-status">
-            <span class="status-badge" :class="doc.parse_status">
-              {{ statusLabel(doc.parse_status) }}
-            </span>
-          </div>
-          <div class="doc-actions" @click.stop>
-            <el-button link type="primary" size="small" @click="editDoc(doc)">编辑</el-button>
-            <el-button v-if="doc.file_path" link type="primary" size="small" @click="reparseDoc(doc)">重新解析</el-button>
-            <el-button link type="warning" size="small" @click="reindexDoc(doc)">重建索引</el-button>
-            <el-button link type="danger" size="small" @click="deleteDoc(doc)">删除</el-button>
           </div>
         </div>
       </div>
@@ -694,6 +692,27 @@ watch(viewMode, (v) => localStorage.setItem('kb-doc-view', v))
 .doc-tag:hover { opacity: 0.82; }
 .tag-close { font-size: 11px; cursor: pointer; }
 .tag-close:hover { opacity: 0.7; }
+
+/* 列表行：图标/内容/操作顶部对齐，状态徽标与标题同行 */
+.doc-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.doc-title-row .doc-title { flex: 1; min-width: 0; }
+.doc-title-row .status-badge { flex-shrink: 0; }
+
+.doc-meta .doc-actions-inline {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  align-items: center;
+}
+.doc-list-item:hover .doc-actions-inline { opacity: 1; }
+
 .viewer-tags {
   margin: 0 16px 12px;
   display: flex;
