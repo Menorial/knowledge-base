@@ -675,6 +675,19 @@ async def _fetch_webpage(url: str) -> tuple[str, str]:
     import httpx
     import re
 
+    # 常见反爬/风控状态码 → 友好提示（CSDN 等站点会拦截服务器抓取）
+    _ANTI_BOT_HINTS = {
+        403: "网站拒绝访问（403，通常是反爬拦截）",
+        405: "网站拒绝该请求方式（405）",
+        418: "网站识别到非浏览器访问（418）",
+        429: "访问过于频繁被限流（429）",
+        503: "网站服务暂不可用（503）",
+        521: "网站源站无法连接（521，CSDN 等 Cloudflare 站点常用来拦截服务器抓取）",
+        522: "网站连接超时（522）",
+        523: "网站源站不可达（523）",
+        524: "网站响应超时（524）",
+    }
+
     try:
         async with httpx.AsyncClient(
             timeout=20.0,
@@ -682,6 +695,15 @@ async def _fetch_webpage(url: str) -> tuple[str, str]:
             headers={"User-Agent": _CLIP_UA},
         ) as client:
             async with client.stream("GET", url) as resp:
+                if resp.status_code in _ANTI_BOT_HINTS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"抓取被拦截：{_ANTI_BOT_HINTS[resp.status_code]}。"
+                            "请改用浏览器书签小工具剪藏（书签把页面 HTML 直接发给知识库，绕开网站风控），"
+                            "在剪藏弹窗里点「复制书签代码」安装。"
+                        ),
+                    )
                 resp.raise_for_status()
                 chunks: list[bytes] = []
                 size = 0
@@ -693,6 +715,15 @@ async def _fetch_webpage(url: str) -> tuple[str, str]:
                 raw = b"".join(chunks)
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        hint = _ANTI_BOT_HINTS.get(code)
+        if hint:
+            raise HTTPException(
+                status_code=400,
+                detail=f"抓取被拦截：{hint}。请改用浏览器书签小工具剪藏（弹窗内可一键复制代码）。",
+            )
+        raise HTTPException(status_code=400, detail=f"网页抓取失败: {e}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"网页抓取失败: {e}")
 

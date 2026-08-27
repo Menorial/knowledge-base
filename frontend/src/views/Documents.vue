@@ -141,10 +141,20 @@
           <el-input v-model="clipForm.tagsText" placeholder="可选，空格分隔多个标签" />
         </el-form-item>
       </el-form>
-      <div style="font-size: 12px; color: #94a3b8; line-height: 1.7;">
+      <div style="font-size: 12px; color: #94a3b8; line-height: 1.7; margin-bottom: 8px;">
         💡 后端会抓取网页正文并自动转为 Markdown 入库（支持搜索 / AI 问答 / 图谱）。
-        也可以安装书签小工具，在任意网页一键剪藏 —— 见 README 说明。
       </div>
+      <el-alert type="warning" :closable="false">
+        <div style="font-size: 12px; line-height: 1.8;">
+          <div>⚠️ 如果网站拦截服务器抓取（如 CSDN 返回 521），请用<b>书签小工具</b>一键剪藏：</div>
+          <ol style="margin: 4px 0 8px 18px; padding: 0;">
+            <li>浏览器收藏夹新建书签，名称填「剪藏」</li>
+            <li>把书签的网址替换为下方代码（点按钮复制）</li>
+            <li>打开目标网页，点书签即可剪藏</li>
+          </ol>
+          <el-button size="small" type="warning" plain @click="copyBookmarklet">📋 复制书签代码</el-button>
+        </div>
+      </el-alert>
       <template #footer>
         <el-button @click="clipVisible = false">取消</el-button>
         <el-button type="primary" @click="doClip" :loading="clipping">剪藏</el-button>
@@ -274,6 +284,17 @@ const createForm = ref({ title: '', content: '' })
 const clipVisible = ref(false)
 const clipping = ref(false)
 const clipForm = ref({ url: '', title: '', tagsText: '' })
+
+const BOOKMARKLET = "javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+document.documentElement.outerHTML;fetch('http://localhost:8000/api/documents/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,title:t,html:h})}).then(function(r){return r.json()}).then(function(d){if(d&&d.id){alert('✅ 已剪藏：《'+d.title+'》')}else{alert('❌ 剪藏失败：'+(d&&d.detail||'未知错误'))}}).catch(function(e){alert('❌ 连接知识库失败：'+e.message+'（请确认后端已启动 http://localhost:8000）')})})();"
+
+async function copyBookmarklet() {
+  try {
+    await navigator.clipboard.writeText(BOOKMARKLET)
+    ElMessage.success('书签代码已复制！粘贴到收藏夹书签的网址里即可')
+  } catch (e) {
+    ElMessage.error('复制失败，请从 README 复制')
+  }
+}
 
 const renamingId = ref(null)
 const renameValue = ref('')
