@@ -699,3 +699,13 @@ VECTOR_DIM=1024
   - 入库后自动触发：FTS 索引、后台向量化、双向链接重建、AI 摘要、可选标签
 - 前端：「文档管理」新增「🌐 网页剪藏」弹窗（URL/标题/标签）；查看器显示来源链接（新窗口打开）
 - 浏览器 Bookmarklet：任意网页点书签一键剪藏（README 附代码）
+
+### v1.4（剪藏质量：正文提取 + 图片本地化）
+
+- 新增 `services/clipper.py` 剪藏管线：
+  - **噪声预清洗**：lxml 删除 `nav/footer/aside/script/style/iframe` 及 class/id 含 ad、ads、banner、sidebar、recommend、related、comment、copyright、advert 的元素
+  - **正文提取**：readability-lxml 按文本密度提取文章主体，失败回退整页
+  - **图片本地化**：正文内远程图片下载到 `data/files/clip/{doc_id}/`（限 5MB/张、仅 image/*、带 Referer 防防盗链、支持相对路径），markdown 引用改为 `/files/clip/{doc_id}/{uuid}.{ext}` 本地路径
+- 后端挂载 `/files` 静态目录（uuid 文件名，安全直出），vite 代理 `/files` 到后端
+- 彻底删除文档时清理对应剪藏图片目录
+- `requirements.txt` 新增 `readability-lxml`；剪藏反爬（521/403 等）返回中文引导提示，弹窗内置书签安装指引

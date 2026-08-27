@@ -14,6 +14,7 @@ from backend.db.models import Document, Chunk, DocumentVersion, DocumentLink
 from backend.db.schemas import DocumentResponse, DocumentListResponse, DocumentPreviewResponse, DocumentUpdate, ClipRequest
 from backend.utils.security import validate_file, safe_save_filename, safe_store_path
 from backend.services.parser import parse_document, ParseError, html_to_markdown
+from backend.services.clipper import extract_main_html, localize_images
 from backend.services.chunker import chunk_markdown
 from backend.services.embedding import embedding_service, embedding_available
 from backend.services.vec_store import delete_by_document_async, bulk_add_async
@@ -749,7 +750,7 @@ async def clip_webpage(
     body: ClipRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """网页剪藏：服务端抓取 URL，或直接接收页面 HTML，转 Markdown 入库"""
+    """网页剪藏：服务端抓取 URL，或直接接收页面 HTML，提取正文 + 图片本地化后入库"""
     if not body.url and not body.html:
         raise HTTPException(status_code=400, detail="需要提供 url 或 html")
 
@@ -765,36 +766,54 @@ async def clip_webpage(
     if not html_content or not html_content.strip():
         raise HTTPException(status_code=400, detail="网页内容为空，抓取失败")
 
-    try:
-        md_content = html_to_markdown(html_content)
-    except ParseError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
     if not title:
         title = source_url[:100] if source_url else "未命名剪藏"
 
+    # 1. 正文提取（去掉导航/广告/页脚等噪声），失败回退整页
+    main_html = extract_main_html(html_content, source_url)
+
+    # 2. 先建文档拿到 doc_id（图片目录按 doc_id 组织，便于彻底删除时清理）
     doc = Document(
         title=title[:500],
         file_path=None,
         file_type="clip",
         file_size=len(html_content),
-        content_md=md_content,
-        parse_status="success" if md_content else "partial",
-        word_count=len(md_content),
+        content_md="",
+        parse_status="pending",
+        word_count=0,
         source_url=source_url or None,
     )
-
     async with session.begin():
         session.add(doc)
         await session.flush()
         doc_id = doc.id
         session.add(DocumentVersion(
             document_id=doc_id,
-            content_md=md_content,
+            content_md="",
             version_note="网页剪藏",
         ))
 
-    # 附加标签（在事务内显式加载 tags，避免懒加载）
+    # 3. 图片本地化（下载到 files/clip/{doc_id}/，src 替换为本地路径）
+    img_dir = settings.file_storage_abs / "clip" / str(doc_id)
+    try:
+        main_html = await localize_images(main_html, source_url, img_dir)
+    except Exception as e:
+        logger.warning(f"剪藏图片本地化失败 doc={doc_id}: {e}")
+
+    # 4. 转 Markdown 并回填
+    try:
+        md_content = html_to_markdown(main_html)
+    except ParseError as e:
+        md_content = ""
+        logger.warning(f"剪藏 Markdown 转换失败 doc={doc_id}: {e}")
+
+    async with session.begin():
+        doc = await session.get(Document, doc_id)
+        doc.content_md = md_content
+        doc.word_count = len(md_content)
+        doc.parse_status = "success" if md_content else "partial"
+
+    # 5. 附加标签（在事务内显式加载 tags，避免懒加载）
     if body.tags:
         from backend.db.models import Tag
         async with session.begin():

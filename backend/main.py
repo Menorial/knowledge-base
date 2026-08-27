@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="个人知识库", version="1.0.0", lifespan=lifespan)
 
+# 剪藏图片等静态资源（文件名为 uuid 随机名，直接暴露安全）
+app.mount("/files", StaticFiles(directory=str(settings.file_storage_abs)), name="files")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

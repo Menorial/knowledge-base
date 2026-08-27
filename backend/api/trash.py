@@ -86,6 +86,16 @@ async def purge_document(doc_id: int, session: AsyncSession = Depends(get_sessio
         except Exception as e:
             logger.error(f"删除原始文件失败 {full_path}: {e}")
 
+    # 删除剪藏图片目录（files/clip/{doc_id}/）
+    clip_dir = settings.file_storage_abs / "clip" / str(doc_id)
+    try:
+        if clip_dir.exists():
+            import shutil
+            shutil.rmtree(clip_dir, ignore_errors=True)
+            logger.info(f"已清理剪藏图片目录: {clip_dir.name}")
+    except Exception as e:
+        logger.error(f"清理剪藏图片目录失败: {e}")
+
     await fts_delete_async(doc_id)
     await delete_by_document_async(doc_id)
 
