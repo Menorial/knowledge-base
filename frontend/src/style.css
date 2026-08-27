@@ -59,6 +59,16 @@
   --el-color-primary-light-8: #dce1fc;
   --el-color-primary-light-9: #eef1fe;
   --el-color-primary-dark-2: #3d55d9;
+
+  /* 标签自动配色（8 组，按标签名哈希取色） */
+  --tag-0-bg: #eef1fe; --tag-0-fg: #3d55d9;
+  --tag-1-bg: #e4f5ed; --tag-1-fg: #1a7f4f;
+  --tag-2-bg: #fdf3e0; --tag-2-fg: #a15c00;
+  --tag-3-bg: #fdeaea; --tag-3-fg: #c73e3e;
+  --tag-4-bg: #e8f0fc; --tag-4-fg: #2f6bc4;
+  --tag-5-bg: #f1ebfe; --tag-5-fg: #7c4de0;
+  --tag-6-bg: #e6f4f5; --tag-6-fg: #1c7e84;
+  --tag-7-bg: #f6efe7; --tag-7-fg: #a45d2d;
 }
 
 /* ---------- 暗色主题变量 ---------- */
@@ -103,6 +113,16 @@ html.dark {
   --el-color-primary-light-8: #2f355e;
   --el-color-primary-light-9: #262c44;
   --el-color-primary-dark-2: #8ea2ff;
+
+  /* 标签自动配色（暗色变体） */
+  --tag-0-bg: #262c44; --tag-0-fg: #8ea2ff;
+  --tag-1-bg: #14382a; --tag-1-fg: #3ecf8e;
+  --tag-2-bg: #3a2e14; --tag-2-fg: #e8a23d;
+  --tag-3-bg: #3d2020; --tag-3-fg: #f26d6d;
+  --tag-4-bg: #1b2b45; --tag-4-fg: #6c9df0;
+  --tag-5-bg: #2d2447; --tag-5-fg: #a78bfa;
+  --tag-6-bg: #12303a; --tag-6-fg: #3fb8be;
+  --tag-7-bg: #35281d; --tag-7-fg: #d08a52;
 }
 
 /* ---------- 基础 ---------- */

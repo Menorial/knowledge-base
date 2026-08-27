@@ -84,7 +84,9 @@
               <span>{{ formatSize(doc.file_size) }}</span>
               <span>{{ formatTime(doc.created_at) }}</span>
               <span v-if="doc.tags && doc.tags.length" style="display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center;">
-                <el-tag size="small" class="doc-tag" v-for="t in doc.tags" :key="t" closable @close="removeTag(doc, t)">{{ t }}</el-tag>
+                <span v-for="t in doc.tags" :key="t" class="doc-tag" :style="tagStyle(t)" @click.stop @dblclick.stop>
+                  {{ t }}<el-icon class="tag-close" @click.stop="removeTag(doc, t)"><Close /></el-icon>
+                </span>
               </span>
               <span class="add-tag-btn" @click.stop="openAddTag(doc)" title="添加标签">+ 标签</span>
             </div>
@@ -112,7 +114,7 @@
           </div>
           <div class="doc-card-title" :title="doc.title">{{ doc.title }}</div>
           <div v-if="doc.tags && doc.tags.length" class="doc-card-tags">
-            <span class="doc-card-tag" v-for="t in doc.tags" :key="t" @click.stop @dblclick.stop>{{ t }}</span>
+            <span class="doc-card-tag" :style="tagStyle(t)" v-for="t in doc.tags" :key="t" @click.stop @dblclick.stop>{{ t }}</span>
           </div>
           <div class="doc-card-meta">
             <span>{{ formatSize(doc.file_size) }}</span>
@@ -206,6 +208,9 @@
           <span>🌐 来源：</span>
           <a :href="viewerDoc.source_url" target="_blank" rel="noopener noreferrer">{{ viewerDoc.source_url }}</a>
         </div>
+        <div v-if="viewerDoc?.tags?.length" class="viewer-tags">
+          <span v-for="t in viewerDoc.tags" :key="t" class="viewer-tag" :style="tagStyle(t)"># {{ t }}</span>
+        </div>
         <div v-if="links.outgoing.length || links.incoming.length" class="doc-links">
           <div v-if="links.outgoing.length" class="links-group">
             <span class="links-label">🔗 本文引用</span>
@@ -263,11 +268,12 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right, Link } from '@element-plus/icons-vue'
+import { Search, Upload, Loading, Refresh, EditPen, Edit, Clock, Right, Link, Close } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import highlight from 'highlight.js'
 import DOMPurify from 'dompurify'
 import { documentsApi, tagsApi, linksApi } from '@/api'
+import { tagStyle } from '@/utils/tagColor'
 
 const route = useRoute()
 const router = useRouter()
@@ -675,8 +681,30 @@ watch(viewMode, (v) => localStorage.setItem('kb-doc-view', v))
 </script>
 
 <style>
-.doc-tag { cursor: pointer; }
-.doc-tag:hover { opacity: 0.8; }
+.doc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  transition: opacity 0.15s;
+}
+.doc-tag:hover { opacity: 0.82; }
+.tag-close { font-size: 11px; cursor: pointer; }
+.tag-close:hover { opacity: 0.7; }
+.viewer-tags {
+  margin: 0 16px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.viewer-tag {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
 .add-tag-btn {
   display: inline-block;
   font-size: 11px;

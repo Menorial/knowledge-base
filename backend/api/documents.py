@@ -128,6 +128,13 @@ async def _bg_summarize(doc_id: int, content_md: str):
     except Exception as e:
         logger.warning(f"自动摘要失败 doc={doc_id}: {e}")
 
+    # 摘要后顺带自动打标签（同样走后台，失败不影响主流程）
+    try:
+        from backend.services.autotag import autotag_document
+        await autotag_document(doc_id, content_md)
+    except Exception as e:
+        logger.warning(f"自动打标签失败 doc={doc_id}: {e}")
+
 
 async def _do_chunk_and_vectorize(session: AsyncSession, doc_id: int, content_md: str):
     """给 reparse/reindex 用的同步版本"""
