@@ -163,7 +163,9 @@ function cycleTheme() {
 .theme-icon { font-size: 14px; }
 .main-content {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--bg-page);
   transition: background-color 0.25s ease;
 }

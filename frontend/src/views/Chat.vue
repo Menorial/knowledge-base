@@ -539,6 +539,7 @@ onMounted(async () => {
 <style scoped>
 .chat-page {
   height: 100%;
+  max-width: none;
   overflow: hidden;
 }
 
