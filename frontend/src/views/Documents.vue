@@ -98,7 +98,7 @@
           </div>
           <div class="doc-actions" @click.stop>
             <el-button link type="primary" size="small" @click="editDoc(doc)">编辑</el-button>
-            <el-button link type="primary" size="small" @click="reparseDoc(doc)">重新解析</el-button>
+            <el-button v-if="doc.file_path" link type="primary" size="small" @click="reparseDoc(doc)">重新解析</el-button>
             <el-button link type="warning" size="small" @click="reindexDoc(doc)">重建索引</el-button>
             <el-button link type="danger" size="small" @click="deleteDoc(doc)">删除</el-button>
           </div>

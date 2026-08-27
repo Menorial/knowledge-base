@@ -406,8 +406,13 @@ async def reparse_document(doc_id: int, session: AsyncSession = Depends(get_sess
         select(Document).where(Document.id == doc_id, Document.is_deleted == False)
     )
     doc = result.scalar_one_or_none()
-    if not doc or not doc.file_path:
-        raise HTTPException(status_code=404, detail="文档或原始文件不存在")
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if not doc.file_path:
+        raise HTTPException(
+            status_code=400,
+            detail="该文档没有原始文件（网页剪藏或在线创建生成），内容已是可直接编辑的 Markdown，无需重新解析",
+        )
 
     full_path = settings.file_storage_abs / Path(doc.file_path).name
     if not full_path.exists():
