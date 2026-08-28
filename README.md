@@ -294,13 +294,35 @@ git clone <私有仓库地址>   # 首次
 git pull                    # 之后每次
 ```
 
+**公司电脑更新后上传（完整流程）：**
+
+```powershell
+cd 知识库
+
+# 1.（每次开始使用前）先拉取最新，把家里电脑的更新合并下来
+git pull
+
+# 2. ……正常使用知识库，上传/剪藏/编辑文档……
+
+# 3. 用完后：先关闭后端（停掉 uvicorn 那个窗口，Ctrl+C）
+
+# 4. 提交并推送你的更新
+git add -A
+git commit -m "同步知识库数据"
+git pull --rebase   # 保险起见再拉一次；若提示冲突请见下方说明
+git push
+```
+
+> 首次在公司电脑 `git push` 时，若提示输入账号密码，用你的 GitHub 用户名 + **Personal Access Token**（GitHub → Settings → Developer settings → Tokens，勾选 repo 权限）作为密码。
+
 **同步注意事项：**
 
 1. **同步前先关闭后端**（Ctrl+C 停掉 uvicorn），确保数据完整写入数据库后再提交；否则最近操作可能还在 WAL 里没进主库
 2. **不要两台电脑同时编辑**：`knowledge.db` 是二进制文件，同时改动会导致 git 合并冲突；以一台电脑为准，另一台先 `git pull` 再使用
-3. 公司电脑 clone 后需要自行创建 `.env`（复制 `.env.example` 填写 API Key），`.env` 不入库
-4. 向量索引（`chunk_embeddings`）也在数据库里，同步后无需重建；如需重建可在「文档管理」→「一键重建全部索引」
-5. 同步前可用设置页「立即备份」先留一份本地快照，更稳妥
+3. **万一冲突了**（`git pull --rebase` 提示 conflict 且文件是 knowledge.db）：先备份你的数据文件，再执行 `git checkout --theirs knowledge.db && git add -A && git rebase --continue`（以远程版本为准），或 `git reset --hard origin/main`（完全放弃本地数据库，用远程的——本地未推送的改动会丢失）
+4. 公司电脑 clone 后需要自行创建 `.env`（复制 `.env.example` 填写 API Key），`.env` 不入库
+5. 向量索引（`chunk_embeddings`）也在数据库里，同步后无需重建；如需重建可在「文档管理」→「一键重建全部索引」
+6. 同步前可用设置页「立即备份」先留一份本地快照，更稳妥
 
 ## 🛣️ 迭代路线
 
