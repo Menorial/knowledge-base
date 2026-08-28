@@ -31,6 +31,42 @@
 - **前端**：Vue 3 / Vite / Element Plus / markdown-it
 - **AI**：OpenAI 兼容接口（GPT / 通义 / DeepSeek）
 
+## 🏗️ 系统架构
+
+```mermaid
+flowchart LR
+    subgraph 前端["Vue3 前端 (5173)"]
+        UI[文档管理 / AI对话 / 搜索 / 图谱<br/>Element Plus + ECharts + d3-force]
+    end
+
+    subgraph 后端["FastAPI 后端 (8000)"]
+        API[API 层<br/>documents / chat / search / tags<br/>trash / system / graph / stats]
+        SVC[服务层<br/>parser → chunker → clipper<br/>embedding / vec_store / fts_sync<br/>rag / llm / links / backup / autotag]
+    end
+
+    subgraph 存储["SQLite + 文件系统"]
+        DB[(knowledge.db<br/>documents + chunks + tags + messages<br/>FTS5 trigram 全文索引)]
+        VEC[(chunk_embeddings<br/>sqlite-vec 向量表)]
+        FILES[data/files<br/>原始文件 + 剪藏图片]
+    end
+
+    LLM[LLM API<br/>DeepSeek / OpenAI / 通义<br/>Embedding: 本地 BGE 模型]
+
+    UI <-->|REST + SSE 流式| API
+    API --> SVC
+    SVC --> DB
+    SVC --> VEC
+    SVC --> FILES
+    SVC <--> LLM
+```
+
+**核心链路：**
+
+- **全文检索**：文档入库 → FTS5 trigram 索引 → `MATCH` + `LIKE` 混合查询 → 高亮片段
+- **RAG 问答**：提问 → BGE 向量化 → sqlite-vec 语义检索 top-k → 上下文拼装 → LLM 流式生成（SSE）→ 引用溯源
+- **双向链接**：正文自动标题匹配 + `[[语法]]` 显式链接 → 图谱数据 → d3-force 可视化
+- **网页剪藏**：抓取/直传 → 噪声清洗 → readability 正文提取 → 图片本地化 → Markdown 入库
+
 ## 🚀 快速开始
 
 ### 环境要求
