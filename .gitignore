@@ -1,4 +1,4 @@
-backup/
+﻿backup/
 .env
 __pycache__/
 *.pyc
@@ -9,4 +9,3 @@ venv/
 .idea/
 *.db-shm
 *.db-wal
-data/

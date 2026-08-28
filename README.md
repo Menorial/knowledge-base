@@ -279,6 +279,28 @@ print(r.json())
 | FTS 中文搜索 | 使用 FTS5 trigram 分词器（SQLite ≥ 3.34），支持中文子串匹配；启动时自动迁移旧索引 |
 | 数据备份 | 启动时自动备份到 `backup/`，保留 `BACKUP_KEEP_DAYS` 天；也可在设置页手动备份 |
 | 文件大小限制 | 默认 20MB，在 `.env` 中修改 `MAX_FILE_SIZE` |
+| 隐私说明 | 若仓库为 Private，`data/`（数据库 + 上传文件）随 git 同步，仅仓库成员可见；`.env`（API Key）始终不入库 |
+
+## 📦 多机同步（私有仓库）
+
+`data/`（knowledge.db 数据库 + `files/` 上传文件与剪藏图片）被 git 跟踪，可用于多台电脑之间同步知识库：
+
+```powershell
+# 电脑 A（当前机）：改完后
+git add -A && git commit -m "同步知识库数据" && git push
+
+# 电脑 B（公司电脑）：拉取
+git clone <私有仓库地址>   # 首次
+git pull                    # 之后每次
+```
+
+**同步注意事项：**
+
+1. **同步前先关闭后端**（Ctrl+C 停掉 uvicorn），确保数据完整写入数据库后再提交；否则最近操作可能还在 WAL 里没进主库
+2. **不要两台电脑同时编辑**：`knowledge.db` 是二进制文件，同时改动会导致 git 合并冲突；以一台电脑为准，另一台先 `git pull` 再使用
+3. 公司电脑 clone 后需要自行创建 `.env`（复制 `.env.example` 填写 API Key），`.env` 不入库
+4. 向量索引（`chunk_embeddings`）也在数据库里，同步后无需重建；如需重建可在「文档管理」→「一键重建全部索引」
+5. 同步前可用设置页「立即备份」先留一份本地快照，更稳妥
 
 ## 🛣️ 迭代路线
 
