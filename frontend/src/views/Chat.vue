@@ -97,6 +97,14 @@
             </div>
           </div>
 
+          <!-- 刚发出、服务端历史尚未刷新的提问：先本地乐观渲染，避免等待期间看不到自己问了什么 -->
+          <div v-if="pendingUserMessage" class="chat-message user">
+            <div class="avatar user">👤</div>
+            <div class="bubble">
+              <div v-html="renderMsg(pendingUserMessage)"></div>
+            </div>
+          </div>
+
           <div v-if="streaming" class="chat-message assistant">
             <div class="avatar">🤖</div>
             <div class="bubble">
@@ -182,6 +190,7 @@ const inputText = ref('')
 const streaming = ref(false)
 const streamingContent = ref('')
 const streamingSources = ref([])
+const pendingUserMessage = ref('')
 const messagesRef = ref(null)
 
 const chatMode = ref('rag')
@@ -445,6 +454,7 @@ async function sendMessage() {
   streaming.value = true
   streamingContent.value = ''
   streamingSources.value = []
+  pendingUserMessage.value = text   // 立即显示提问
   inputText.value = ''
   scrollToBottom()
   nextTick(() => addCodeCopyButtons())
@@ -522,6 +532,8 @@ async function sendMessage() {
       await loadCurrentConversation()
       await loadConversations()
     }
+    // 服务端此时已保存该提问，历史里已经包含它，撤掉临时渲染
+    pendingUserMessage.value = ''
   }
 }
 
