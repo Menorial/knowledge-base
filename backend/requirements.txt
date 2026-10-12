@@ -1,6 +1,10 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-sqlalchemy>=2.0.0
+# [asyncio] 额外依赖会一并安装 greenlet —— SQLAlchemy 异步引擎（create_async_engine）必需。
+# 若只写 sqlalchemy，Windows 上 pip 不会带上 greenlet，启动时会报
+# "The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed"。
+sqlalchemy[asyncio]>=2.0.0
+greenlet>=3.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
 python-multipart>=0.0.9
