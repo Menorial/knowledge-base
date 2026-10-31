@@ -16,7 +16,7 @@
 - [API 速查](#-api-速查)
 - [常见问题](#-常见问题)
 - [数据与隐私](#-数据与隐私)
-- [多机同步](#-多机同步)
+- [备份与迁移](#-备份与迁移)
 - [迭代路线](#-迭代路线)
 - [License](#-license)
 
@@ -32,7 +32,7 @@
 | 🏷️ 标签管理 | 多标签分类，自动配色（按名称稳定取色，暗色适配） |
 | 🤖 AI 自动打标签 | 上传/编辑后 AI 自动生成 1-5 个标签 |
 | 📝 手动编辑 | 解析错了？直接手动修正 Markdown |
-| 🔄 版本历史 | 每次修改自动存档，可预览、可回滚 |
+| 🔄 版本历史 | 每次修改自动存档（保留最近 30 份），可预览、可回滚 |
 | 🗑️ 回收站 | 软删除 + 恢复 + 彻底清除 |
 | 🔗 双向链接 | 正文提到其他文档标题自动关联，`[[标题]]` 显式链接，互相可见 |
 | 🕸️ 知识图谱 | 文档关联网络可视化，可拖拽/缩放，点击直达文档 |
@@ -149,11 +149,13 @@ pip install -r backend/requirements.txt
 
 ```bash
 cd <项目根目录>
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 启动时会自动创建数据库、加载向量模型并做一次备份，日志出现
-`Uvicorn running on http://0.0.0.0:8000` 即成功。访问 <http://localhost:8000/docs> 查看 API 文档。
+`Uvicorn running on http://127.0.0.1:8000` 即成功。访问 <http://localhost:8000/docs> 查看 API 文档。
+
+> 🔒 默认只监听本机。接口没有鉴权，只有确实需要手机/局域网访问时才改成 `--host 0.0.0.0`。
 
 ### 第五步：启动前端
 
@@ -173,7 +175,7 @@ npm run dev
 ```powershell
 # 终端 1 — 后端（必须在项目根目录）
 cd <项目根目录>
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 
 # 终端 2 — 前端
 cd <项目根目录>\frontend
@@ -241,7 +243,7 @@ pip install greenlet
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` | `text-embedding-3-small` | `1536` |
 | 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | `text-embedding-v3` | `1024` |
 
-> ⚠️ 修改 `VECTOR_DIM` 后，启动时会自动重建向量表，之后需再到「文档管理」页点一次「一键重建全部索引」。
+> ⚠️ 修改 `VECTOR_DIM` 后，启动时会自动重建向量表，之后需再到「文档管理」页点一次「一键重建全部索引」（后台执行，完成后刷新即可）。
 
 ### 存储与备份
 
@@ -298,7 +300,7 @@ knowledge-base/
 │   │   ├── api/               # 后端接口封装
 │   │   └── stores/            # Pinia 状态管理
 │   └── vite.config.js
-├── data/                       # 运行时数据（自动创建）
+├── data/                       # 运行时数据（自动创建，已被 .gitignore 忽略）
 │   ├── knowledge.db           # SQLite 数据库
 │   └── files/                 # 原始文件存储
 ├── backup/                     # 自动备份目录（启动时自动生成）
@@ -502,64 +504,30 @@ npm config set registry https://registry.npmmirror.com
 `AI_BASE_URL`。数据库、原始文件、标签、知识图谱都不会被上传。
 若设置 `AI_EMBEDDING_MODEL=local`，连向量化过程也完全在本机完成。
 
-**⚠️ 分享或开源前请注意**
+**⚠️ 不要把 data/ 提交进 git**
 
-`data/` 目录**默认被 git 跟踪**（这是为了支持[多机同步](#-多机同步)），里面是真实文档。
-如果要公开仓库或把项目分享给他人，请先停止跟踪并清理：
+`data/`、`.env`、`backup/` 都已在 `.gitignore` 中，不会被提交。
+如果你是从旧版本升级、历史里已经提交过 `data/`，`git rm --cached` 只影响后续提交，
+旧文件仍留在 Git 历史中，需要用 `git filter-repo` 重写历史。
 
-```bash
-git rm -r --cached data
-echo "data/" >> .gitignore
-git commit -m "不再跟踪私有数据"
-```
+## 💾 备份与迁移
 
-> 注意：这样只是让**后续提交**不再包含数据，GitHub 的提交历史里仍然留有旧文件。
-> 如需彻底清除，要用 `git filter-repo` 重写历史并强制推送。
+`data/`（数据库 + 原始文件）**不在 git 仓库里** —— 里面是你的真实文档，提交上去就会随仓库公开。
+迁移或备份请走下面两种方式。
 
-## 📦 多机同步
+**方式 1：内置备份（推荐）**
 
-`data/`（`knowledge.db` 数据库 + `files/` 上传文件与剪藏图片）被 git 跟踪，可用于多台电脑之间同步知识库。
-**该方案仅适用于私有仓库** —— 公开仓库会把你的文档一并公开。
+- 启动后端时自动备份到 `backup/`，按 `BACKUP_KEEP_DAYS` 保留若干天；
+- 也可以在「设置」页点「立即备份」；
+- 备份结构是 `backup/<时间戳>/knowledge.db` + `files/`，整个目录拷走即可还原。
 
-```powershell
-# 电脑 A：改完后
-git add -A && git commit -m "同步知识库数据" && git push
+**方式 2：手动拷贝**
 
-# 电脑 B：拉取
-git clone <私有仓库地址>   # 首次
-git pull                    # 之后每次
-```
+1. 先关闭后端（Ctrl+C），确保 WAL 已写回主库；
+2. 把 `data/` 和 `.env` 拷到新机器；
+3. 新机器装好依赖后启动即可。
 
-**在另一台电脑上更新后上传（完整流程）：**
-
-```powershell
-cd knowledge-base
-
-# 1.（每次开始使用前）先拉取最新，把另一台电脑的更新合并下来
-git pull
-
-# 2. ……正常使用知识库，上传/剪藏/编辑文档……
-
-# 3. 用完后：先关闭后端（停掉 uvicorn 那个窗口，Ctrl+C）
-
-# 4. 提交并推送你的更新
-git add -A
-git commit -m "同步知识库数据"
-git pull --rebase   # 保险起见再拉一次；若提示冲突请见下方说明
-git push
-```
-
-> 首次 `git push` 时若提示输入账号密码，用你的 GitHub 用户名 + **Personal Access Token**
-> （GitHub → Settings → Developer settings → Tokens，勾选 repo 权限）作为密码。
-
-**同步注意事项：**
-
-1. **同步前先关闭后端**（Ctrl+C 停掉 uvicorn），确保数据完整写入数据库后再提交；否则最近操作可能还在 WAL 里没进主库
-2. **不要两台电脑同时编辑**：`knowledge.db` 是二进制文件，同时改动会导致 git 合并冲突；以一台电脑为准，另一台先 `git pull` 再使用
-3. **万一冲突了**（`git pull --rebase` 提示 conflict 且文件是 `knowledge.db`）：先备份你的数据文件，再执行 `git checkout --theirs knowledge.db && git add -A && git rebase --continue`（以远程版本为准），或 `git reset --hard origin/main`（完全放弃本地数据库，用远程的——本地未推送的改动会丢失）
-4. 新电脑 clone 后需要自行创建 `.env`（复制 `.env.example` 填写 API Key），`.env` 不入库
-5. 向量索引（`chunk_embeddings`）也在数据库里，同步后无需重建；如需重建可在「文档管理」→「一键重建全部索引」
-6. 同步前可用设置页「立即备份」先留一份本地快照，更稳妥
+> ⚠️ 不要用 git 同步 `data/`。一旦提交，文档就进了 Git 历史，之后再开源也无法彻底撤回。
 
 ## 🛣️ 迭代路线
 
