@@ -1,9 +1,9 @@
-# 个人知识库系统 — 功能与架构设计文档
+﻿# 个人知识库系统 — 功能与架构设计文档
 
-> 版本：v1.7
+> 版本：v1.0
 > 日期：2026-10-31
 >
-> 本文档描述**当前实现**（以代码为准）。历次功能演进见[第九节](#九更新记录)。
+> 本文档描述**当前实现**，以代码为准。变更历史见 git 提交记录。
 
 ## 一、项目概述
 
@@ -367,6 +367,19 @@ SQLite 会复用被删掉的最大 rowid，两个并发任务拿到相同 chunk 
 - 版本历史每篇保留最近 **30** 份。
 - 标签 `usage_count` 是冗余字段，所有关联变更后统一重算（`services/tags_usage.py`）。
 
+#### 3.3.7 几个关键取舍
+
+- **全文索引用 trigram 而不是 unicode61**：unicode61 会把整段中文当成一个 token，
+  只能整词命中；trigram 按 3 字滑窗索引，天然支持中文子串匹配。代价是索引更大，
+  且 1–2 字的词检索不生效，所以短词走 `LIKE` 兜底。
+- **向量表用原生 `sqlite3` 连接创建**：`aiosqlite` 的代理连接上 `enable_load_extension`
+  不可用，会报 `no such module: vec0`；建表、写入、检索都走原生连接，放在
+  `asyncio.to_thread` 里执行，不阻塞事件循环。
+- **Markdown 一律先净化再渲染**：文档内容可能来自网页剪藏或手动编辑，前端统一经
+  `DOMPurify` 处理后才能 `v-html`。
+- **本地模型不可用时不阻塞主流程**：Embedding 失败时检索退化为关键词匹配；
+  未配置 API Key 时只关闭 AI 对话/摘要/自动标签，上传、搜索、标签等能力照常。
+
 ## 四、数据库设计
 
 ### 4.1 表结构
@@ -655,102 +668,3 @@ VECTOR_DIM=1024
 | 数据丢失 | 灾难性 | 启动自动备份 + 软删除 + 版本历史 |
 | 局域网暴露 | 无鉴权可被读写 | 默认只监听 127.0.0.1；CORS 收紧到本地前端 |
 | API Key 泄露 | 费用风险 | `.env` 管理且已被 `.gitignore` 忽略 |
-
-## 九、更新记录
-
-### v1.1（本次优化）
-
-**缺陷修复**
-- 文档列表/详情不再丢失标签（`_doc_to_response` 此前恒返回空标签）
-- 编辑文档内容后向量索引现在会正确重建（原条件在赋值后恒为 False）
-- 会话消息按 `id` 稳定排序，修复历史乱序
-- 「重新生成」不再重复插入用户消息
-- 全文搜索改为 FTS5 **trigram** 分词：中文子串匹配（原 unicode61 把整段中文当一个 token，段落中间的词搜不到）；1-2 字词走 LIKE 兜底；查询特殊字符安全净化
-- FTS 表启动时自动从 unicode61 迁移到 trigram 并回填
-- 向量表启动时校验维度与 `VECTOR_DIM` 一致，不一致自动重建（默认 512 匹配本地 BGE-small）
-- vec0 虚拟表改用原生 sqlite3 连接创建（aiosqlite 代理连接无法加载扩展）
-- Markdown 渲染接入 DOMPurify 净化，消除 XSS 风险
-
-**新增功能**
-- 回收站：列表 / 恢复 / 彻底删除（`/api/trash` + 前端页面）
-- 版本历史：列表 / 内容预览 / 一键回滚（前端弹窗）
-- 自动备份：启动时后台执行 + 设置页手动触发，保留 `BACKUP_KEEP_DAYS` 天（`services/backup.py`）
-- 设置页真实生效：`GET/PUT /api/settings` 读写 `.env` 并热更新 LLM 客户端，无需重启
-- AI 自动摘要：上传/编辑后后台生成文档摘要（`documents.summary`）
-- 搜索页点击结果直接打开文档查看器（路由 `?open=<id>`）
-
-**其他**
-- `embedding_available()` 统一判断本地/API 型 Embedding 可用性（本地 BGE 不再依赖 API Key）
-- 前端 API 封装整合（`src/api/index.js`），Vite vendor 分包
-- README / .env.example 同步更新（VECTOR_DIM=512、热更新说明等）
-
-### v1.2（双向链接 + 知识图谱）
-
-**双向链接（A+B 方案）**
-- 新增 `document_links` 表（from_doc_id / to_doc_id / source，唯一约束防重）
-- `services/links.py`：
-  - **A 自动标题匹配**：正文出现其他文档标题即建链，最长优先、跳过代码块/行内代码/已占用区间、长度 <2 不匹配防误连
-  - **B `[[标题]]` 语法**：显式精确链接，优先级高于自动；同一目标只保留最高优先级来源
-  - 全量重建串行化（threading.Lock），防止并发编辑互相覆盖
-- 文档 上传/新建/编辑/重命名/重新解析/版本回滚/软删除/恢复/彻底删除 后均自动触发后台重建；启动时对存量库自动补建
-- `GET /api/documents/{id}/links`：返回 outgoing（本文引用）+ incoming（被引用）
-- `GET /api/graph`：图谱节点（含标签）+ 边（含链接来源类型）
-
-**前端**
-- 文档查看器新增「关联文档」区：引用/被引用标签页，来源着色（自动=蓝、语法=绿），点击即可切换查看
-- 新增「知识图谱」页面 `/graph`：d3-force 力导向图，节点大小=连接数、边按来源着色、节点可拖拽、滚轮缩放、空白平移、点击节点直达文档
-- 侧边栏新增「🕸️ 知识图谱」入口
-
-### v1.3（网页剪藏）
-
-- `documents` 表新增 `source_url` 字段（启动自动迁移），记录剪藏来源
-- `POST /api/documents/clip`：两种输入
-  - `url`：服务端抓取（httpx 流式限 5MB、20s 超时、UA 伪装、编码探测 `<meta charset>` / UTF-8）
-  - `html`：直接接收页面 HTML（bookmarklet 用，绕开登录墙/抓取失败）
-  - 均走 `html_to_markdown`（从 HTMLParser 抽出复用）转 Markdown，file_type=clip
-  - 入库后自动触发：FTS 索引、后台向量化、双向链接重建、AI 摘要、可选标签
-- 前端：「文档管理」新增「🌐 网页剪藏」弹窗（URL/标题/标签）；查看器显示来源链接（新窗口打开）
-- 浏览器 Bookmarklet：任意网页点书签一键剪藏（README 附代码）
-
-### v1.4（剪藏质量：正文提取 + 图片本地化）
-
-- 新增 `services/clipper.py` 剪藏管线：
-  - **噪声预清洗**：lxml 删除 `nav/footer/aside/script/style/iframe` 及 class/id 含 ad、ads、banner、sidebar、recommend、related、comment、copyright、advert 的元素
-  - **正文提取**：readability-lxml 按文本密度提取文章主体，失败回退整页
-  - **图片本地化**：正文内远程图片下载到 `data/files/clip/{doc_id}/`（限 5MB/张、仅 image/*、带 Referer 防防盗链、支持相对路径），markdown 引用改为 `/files/clip/{doc_id}/{uuid}.{ext}` 本地路径
-- 后端挂载 `/files` 静态目录（uuid 文件名，安全直出），vite 代理 `/files` 到后端
-- 彻底删除文档时清理对应剪藏图片目录
-- `requirements.txt` 新增 `readability-lxml`；剪藏反爬（521/403 等）返回中文引导提示，弹窗内置书签安装指引
-
-### v1.5（前端视觉升级：笔记风 + 暗色模式 + 图表）
-
-- **设计系统**：全局 CSS 变量（暖白笔记色板 / 圆角 / 阴影 / 排版），亮暗双套变量，`html.dark` 切换
-- **暗色模式**：侧边栏底部开关（亮色 → 暗色 → 跟随系统 三态循环），localStorage 持久化，跟随系统实时响应；Element Plus dark css-vars；所有页面颜色变量化
-- **侧边栏重设计**：浅色笔记风、logo 区、active 指示条、底部主题开关
-- **仪表盘**：ECharts 重写（近 7 日趋势面积图、解析状态环形图、Top 标签渐变条形图），统计卡 hover 动效
-- **文档管理**：列表/卡片视图切换（localStorage 记忆），卡片含图标/标签/字数/状态，hover 抬升
-- **对话/搜索/图谱/回收站/设置**：统一变量化配色与精致卡片、柔和阴影、过渡动效
-
-### v1.6（标签自动适配：自动配色 + AI 自动打标签）
-
-- **标签自动配色**：CSS 定义 8 组亮/暗双主题标签色变量；`utils/tagColor.js` 按标签名哈希稳定取色（同一标签全站颜色一致）；文档列表/卡片/查看器的标签自动配色，暗色模式自动切换变体
-- **AI 自动打标签**：`services/autotag.py` —— LLM 根据内容生成 1-5 个标签（过滤宽泛词），文档已有标签时跳过（尊重手动），复用/创建 Tag 并更新 usage_count；随 `_bg_summarize` 在上传/新建/剪藏/编辑/回滚后后台触发
-- 文档查看器新增标签展示区
-
-### v1.7（稳定性加固 + 开源准备）
-
-**修复**
-- 链接重建死锁：`threading.Lock` 跨 `await` 持有会阻塞事件循环，改为按事件循环取 `asyncio.Lock`（`utils/loop_lock.py`）
-- 并发保存导致向量索引静默丢失：两个重建任务交错删除/插入 chunk，SQLite 复用 rowid 撞 `chunk_embeddings` 主键；改为按 `doc_id` 串行化
-- 软删除不再删除向量，恢复文档后可立即被 RAG 检索；历史缺向量的文档恢复时自动补建
-- 标签计数只增不减：新增 `services/tags_usage.py`，写操作后统一重算
-- 标签重名导致 500、空标签名可创建：改为 400 并统一 `strip()`
-- 搜索：连字符查询拆词、`%`/`_` 转义、结果分页、相关度归一化（原公式恒 >100%）
-- `reindex-all` 改为后台执行；版本历史裁剪到 30 份；`reparse` 失败时正确落库 `failed`
-- 索引不再覆盖 `failed/partial` 解析状态
-- 搜索结果 snippet 接入 DOMPurify（原为裸 `v-html`）
-
-**架构**
-- 链接重建支持按文档增量 + 请求合并，正文编辑不再触发全表扫描
-- CORS 改为按路径放行：仅本地前端，剪藏接口保留任意来源（书签小工具）
-- 新增 `tests/`（10 个纯函数用例）与 GitHub Actions
