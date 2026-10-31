@@ -575,7 +575,7 @@ async function reindexAll() {
     reindexing.value = true
     ElMessage.info('正在批量重建索引，请稍候...')
     const data = await documentsApi.reindexAll()
-    ElMessage.success(`完成！${data.documents} 个文档，共 ${data.chunks} 个片段`)
+    ElMessage.success(data.msg || `已在后台重建 ${data.documents} 篇文档的索引`)
   } catch (err) {
     if (err !== 'cancel') ElMessage.error(err.message || '批量重建失败')
   } finally {

@@ -16,7 +16,12 @@ async def overview(session: AsyncSession = Depends(get_session)):
     conv_count = (await session.execute(select(func.count()).select_from(Conversation))).scalar() or 0
     msg_count = (await session.execute(select(func.count()).select_from(Message))).scalar() or 0
     tag_count = (await session.execute(select(func.count()).select_from(Tag))).scalar() or 0
-    chunk_count = (await session.execute(select(func.count()).select_from(Chunk))).scalar() or 0
+    chunk_count = (await session.execute(
+        select(func.count())
+        .select_from(Chunk)
+        .join(Document, Document.id == Chunk.document_id)
+        .where(Document.is_deleted == False)
+    )).scalar() or 0
 
     # 最近 7 天文档上传趋势
     trend = []
@@ -61,10 +66,15 @@ async def test_llm():
     try:
         messages = [{"role": "user", "content": "ping"}]
         result = ""
-        async for chunk in llm_service.chat_stream(messages):
-            result += chunk
-            if len(result) > 10:
-                break
+        stream = llm_service.chat_stream(messages)
+        try:
+            async for chunk in stream:
+                result += chunk
+                if len(result) > 10:
+                    break
+        finally:
+            # 中途 break 不会自动关闭底层连接，必须显式 aclose
+            await stream.aclose()
         return {"ok": True, "response_preview": result[:100]}
     except Exception as e:
         return {"ok": False, "error": str(e)}

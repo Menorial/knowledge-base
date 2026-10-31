@@ -27,16 +27,27 @@
     <div class="result-list">
       <div v-for="r in results" :key="r.id" class="result-card" @click="openDoc(r.id)">
         <div class="result-title">📄 {{ r.title }}</div>
-        <div class="result-snippet" v-html="r.snippet"></div>
-        <div class="result-meta">匹配度：{{ (100 - Math.min(99, r.rank * 20)).toFixed(0) }}%</div>
+        <div class="result-snippet" v-html="safeSnippet(r.snippet)"></div>
+        <div v-if="r.rank" class="result-meta">相关度：{{ matchScore(r) }}%</div>
       </div>
+    </div>
+
+    <div v-if="total > pageSize" class="pager">
+      <el-pagination
+        layout="prev, pager, next"
+        :total="total"
+        :page-size="pageSize"
+        :current-page="page"
+        @current-change="onPageChange"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import DOMPurify from 'dompurify'
 import { searchApi } from '@/api'
 
 const query = ref('')
@@ -45,15 +56,33 @@ const total = ref(0)
 const loading = ref(false)
 const elapsed = ref(0)
 const hasSearched = ref(false)
+const page = ref(1)
+const pageSize = 20
 const router = useRouter()
 
-async function doSearch() {
+// FTS5 的 bm25 rank 是负数（越小越相关），原公式 100 - rank*20 会恒大于 100%。
+// 这里按本页最相关的那条归一化成 0-100%。
+const bestRank = computed(() =>
+  Math.max(...results.value.map((r) => Math.abs(r.rank || 0)), 1e-6)
+)
+
+function matchScore(r) {
+  return Math.max(1, Math.round((Math.abs(r.rank || 0) / bestRank.value) * 100))
+}
+
+// snippet 来自 FTS 的 snippet()，内容是文档原文（可能含 HTML），
+// 只保留高亮用的 <mark>，其余标签/属性全部去掉
+const safeSnippet = (html) =>
+  DOMPurify.sanitize(html || '', { ALLOWED_TAGS: ['mark'], ALLOWED_ATTR: [] })
+
+async function doSearch(reset = true) {
   if (!query.value.trim()) return
+  if (reset !== false) page.value = 1
   loading.value = true
   hasSearched.value = true
   const t0 = Date.now()
   try {
-    const data = await searchApi.fulltext(query.value)
+    const data = await searchApi.fulltext(query.value, page.value, pageSize)
     results.value = data.results
     total.value = data.total
     elapsed.value = Date.now() - t0
@@ -64,6 +93,11 @@ async function doSearch() {
   }
 }
 
+function onPageChange(p) {
+  page.value = p
+  doSearch(false)
+}
+
 function openDoc(id) {
   router.push({ path: '/documents', query: { open: id } })
 }
@@ -71,6 +105,7 @@ function openDoc(id) {
 
 <style scoped>
 .search-page { padding: 24px; }
+.pager { display: flex; justify-content: center; margin-top: 16px; }
 .search-box { max-width: 800px; margin: 0 auto 24px; }
 .result-info { color: var(--text-2); font-size: 13px; margin-bottom: 16px; padding: 0 4px; }
 .result-list { display: flex; flex-direction: column; gap: 12px; }

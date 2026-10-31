@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from backend.db.database import get_session
 from backend.db.models import Tag, Document, DocumentTag
 from backend.db.schemas import TagResponse, TagCreate
+from backend.services.tags_usage import recompute_tag_usage
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tags", tags=["tags"])
@@ -20,10 +21,13 @@ async def list_tags(session: AsyncSession = Depends(get_session)):
 
 @router.post("", response_model=TagResponse)
 async def create_tag(body: TagCreate, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Tag).where(Tag.name == body.name))
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="标签名不能为空")
+    result = await session.execute(select(Tag).where(Tag.name == name))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="标签已存在")
-    tag = Tag(name=body.name, color=body.color)
+    tag = Tag(name=name, color=body.color)
     session.add(tag)
     await session.commit()
     await session.refresh(tag)
@@ -36,7 +40,15 @@ async def update_tag(tag_id: int, body: TagCreate, session: AsyncSession = Depen
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
-    tag.name = body.name
+
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="标签名不能为空")
+    dup = await session.execute(select(Tag).where(Tag.name == name, Tag.id != tag_id))
+    if dup.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="标签已存在")
+
+    tag.name = name
     tag.color = body.color
     await session.commit()
     await session.refresh(tag)
@@ -51,6 +63,7 @@ async def delete_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
         raise HTTPException(status_code=404, detail="标签不存在")
     await session.delete(tag)
     await session.commit()
+    await recompute_tag_usage(session)
     return {"code": 0, "msg": "ok"}
 
 
@@ -67,7 +80,11 @@ async def add_tag_to_document(
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
 
-    for tag_name in tag_names:
+    names = [t.strip() for t in tag_names if t and t.strip()]
+    if not names:
+        raise HTTPException(status_code=400, detail="标签名不能为空")
+
+    for tag_name in names:
         tag_result = await session.execute(select(Tag).where(Tag.name == tag_name))
         tag = tag_result.scalar_one_or_none()
         if not tag:
@@ -78,6 +95,7 @@ async def add_tag_to_document(
             tag.usage_count = (tag.usage_count or 0) + 1
 
     await session.commit()
+    await recompute_tag_usage(session)
     return {"code": 0, "msg": "ok"}
 
 
@@ -101,4 +119,5 @@ async def remove_tag_from_document(
         tag.usage_count = max(0, (tag.usage_count or 0) - 1)
 
     await session.commit()
+    await recompute_tag_usage(session)
     return {"code": 0, "msg": "ok"}

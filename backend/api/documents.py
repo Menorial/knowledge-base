@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,23 +17,48 @@ from backend.services.parser import parse_document, ParseError, html_to_markdown
 from backend.services.clipper import extract_main_html, localize_images
 from backend.services.chunker import chunk_markdown
 from backend.services.embedding import embedding_service, embedding_available
-from backend.services.vec_store import delete_by_document_async, bulk_add_async
+from backend.services.vec_store import delete_by_document_async, bulk_add_async, has_vectors_async
 from backend.services.fts_sync import fts_upsert_async, fts_delete_async
-from backend.services.links import rebuild_all_links
+from backend.services.links import schedule_rebuild
+from backend.services.tags_usage import recompute_tag_usage
+from backend.utils.loop_lock import loop_lock
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 def _schedule_links_rebuild():
-    """后台重建双向链接（不影响主流程，失败仅记日志）"""
-    async def _run():
-        try:
-            async with async_session() as session:
-                await rebuild_all_links(session)
-        except Exception as e:
-            logger.error(f"链接重建失败: {e}", exc_info=True)
-    asyncio.create_task(_run())
+    """后台全量重建双向链接（标题集合变化时用）"""
+    schedule_rebuild(full=True)
+
+
+def _schedule_links_rebuild_for(doc_id: int):
+    """后台只重建某篇文档的出边（正文变化、标题没变时用）"""
+    schedule_rebuild(doc_id=doc_id)
+
+
+MAX_VERSIONS_PER_DOC = 30
+
+
+async def _prune_versions(session: AsyncSession, doc_id: int, keep: int = MAX_VERSIONS_PER_DOC) -> None:
+    """版本历史只保留最近 N 份，避免长文档反复编辑把库撑大"""
+    keep_ids = (
+        await session.execute(
+            select(DocumentVersion.id)
+            .where(DocumentVersion.document_id == doc_id)
+            .order_by(DocumentVersion.id.desc())
+            .limit(keep)
+        )
+    ).scalars().all()
+    if not keep_ids:
+        return
+    await session.execute(
+        delete(DocumentVersion).where(
+            DocumentVersion.document_id == doc_id,
+            DocumentVersion.id.notin_(keep_ids),
+        )
+    )
+    await session.commit()
 
 
 def _doc_to_response(doc: Document, tags: list[str] | None = None) -> DocumentResponse:
@@ -61,47 +86,70 @@ def _doc_to_response(doc: Document, tags: list[str] | None = None) -> DocumentRe
 
 
 async def _bg_vectorize(doc_id: int, content_md: str):
-    """后台向量化：自己管理 session，上传接口可立即返回"""
+    """后台向量化：自己管理 session，上传接口可立即返回。
+
+    同一篇文档的并发重建（连续保存、保存与恢复重叠）会交错执行「删 chunk → 插 chunk」，
+    而 SQLite 会复用被删掉的最大 rowid，两个任务就会撞上 chunk_embeddings 的主键，
+    结果是向量索引静默丢失。所以按 doc_id 串行化整个写入过程。
+    """
     try:
-        chunks = chunk_markdown(content_md)
-        await delete_by_document_async(doc_id)
+        async with loop_lock(f"index:{doc_id}"):
+            chunks = chunk_markdown(content_md)
+            await delete_by_document_async(doc_id)
 
-        async with async_session() as session:
-            await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
-            await session.commit()
-
-            if not chunks:
-                return
-
-            chunk_ids = []
-            async with session.begin():
-                for c in chunks:
-                    ck = Chunk(
-                        document_id=doc_id,
-                        chunk_index=c.index,
-                        content=c.content,
-                        section_path=c.section_path,
-                        token_count=c.token_count,
-                    )
-                    session.add(ck)
-                    await session.flush()
-                    chunk_ids.append(ck.id)
-
-            embeddings = await embedding_service.batch_embed([c.content for c in chunks])
-            await bulk_add_async(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
-
-            # 更新文档状态
-            doc = await session.get(Document, doc_id)
-            if doc:
-                doc.parse_status = "success"
+            async with async_session() as session:
+                await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
                 await session.commit()
 
-        logger.info(f"文档 {doc_id} 向量化完成, {len(chunks)} 个片段")
+                if not chunks:
+                    return
+
+                chunk_ids = []
+                async with session.begin():
+                    for c in chunks:
+                        ck = Chunk(
+                            document_id=doc_id,
+                            chunk_index=c.index,
+                            content=c.content,
+                            section_path=c.section_path,
+                            token_count=c.token_count,
+                        )
+                        session.add(ck)
+                        await session.flush()
+                        chunk_ids.append(ck.id)
+
+                embeddings = await embedding_service.batch_embed([c.content for c in chunks])
+                await bulk_add_async(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
+
+                # 只把「处理中」推进为成功；failed/partial 是原文件的真实状态，不要覆盖
+                doc = await session.get(Document, doc_id)
+                if doc and doc.parse_status in ("processing", "pending"):
+                    doc.parse_status = "success"
+                    await session.commit()
+
+            logger.info(f"文档 {doc_id} 向量化完成, {len(chunks)} 个片段")
     except Exception as e:
         logger.error(f"向量化失败 {doc_id}: {e}", exc_info=True)
 
     # 摘要生成独立于向量化，失败不影响主流程
     await _bg_summarize(doc_id, content_md)
+
+
+async def ensure_document_vectors(doc_id: int, content_md: str):
+    """恢复文档时确保向量索引存在。
+
+    旧版本软删除会同时删掉向量，恢复后文档就再也检索不到了；
+    现在改为彻底删除时才清理，这里只兜底历史数据（有内容但没有向量）。
+    """
+    try:
+        if not content_md or not embedding_available():
+            return
+        if await has_vectors_async(doc_id):
+            return
+        logger.info(f"文档 {doc_id} 缺少向量索引，后台补建")
+        asyncio.create_task(_bg_vectorize(doc_id, content_md))
+    except Exception as e:
+        logger.warning(f"恢复文档时补建向量失败 doc={doc_id}: {e}")
 
 
 async def _bg_summarize(doc_id: int, content_md: str):
@@ -137,34 +185,35 @@ async def _bg_summarize(doc_id: int, content_md: str):
 
 
 async def _do_chunk_and_vectorize(session: AsyncSession, doc_id: int, content_md: str):
-    """给 reparse/reindex 用的同步版本"""
-    chunks = chunk_markdown(content_md)
+    """给 reparse/reindex 用的同步版本（与后台任务共用同一把按文档的锁）"""
+    async with loop_lock(f"index:{doc_id}"):
+        chunks = chunk_markdown(content_md)
 
-    await delete_by_document_async(doc_id)
-    await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
-    await session.commit()
+        await delete_by_document_async(doc_id)
+        await session.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc_id})
+        await session.commit()
 
-    if not chunks:
-        return 0
+        if not chunks:
+            return 0
 
-    chunk_ids = []
-    async with session.begin():
-        for c in chunks:
-            ck = Chunk(
-                document_id=doc_id,
-                chunk_index=c.index,
-                content=c.content,
-                section_path=c.section_path,
-                token_count=c.token_count,
-            )
-            session.add(ck)
-            await session.flush()
-            chunk_ids.append(ck.id)
+        chunk_ids = []
+        async with session.begin():
+            for c in chunks:
+                ck = Chunk(
+                    document_id=doc_id,
+                    chunk_index=c.index,
+                    content=c.content,
+                    section_path=c.section_path,
+                    token_count=c.token_count,
+                )
+                session.add(ck)
+                await session.flush()
+                chunk_ids.append(ck.id)
 
-    embeddings = await embedding_service.batch_embed([c.content for c in chunks])
-    await bulk_add_async(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
+        embeddings = await embedding_service.batch_embed([c.content for c in chunks])
+        await bulk_add_async(list(zip(chunk_ids, [doc_id] * len(chunks), embeddings)))
 
-    return len(chunks)
+        return len(chunks)
 
 
 @router.post("/upload")
@@ -324,8 +373,9 @@ async def update_document(
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
 
-    # 必须在赋值前记录内容是否变化，否则赋值后比较恒为 False，向量索引永远不会更新
+    # 必须在赋值前记录变化，否则赋值后比较恒为 False，向量索引永远不会更新
     content_changed = body.content_md is not None and body.content_md != doc.content_md
+    title_changed = body.title is not None and body.title != doc.title
 
     if body.title is not None:
         doc.title = body.title
@@ -342,18 +392,21 @@ async def update_document(
 
     await session.commit()
     await session.refresh(doc)
+    await _prune_versions(session, doc.id)
 
     await fts_upsert_async(doc.id, doc.title, doc.content_md)
 
     if content_changed and embedding_available():
-        try:
-            await _do_chunk_and_vectorize(session, doc.id, body.content_md)
-        except Exception as e:
-            logger.error(f"更新后向量化失败 {doc.id}: {e}", exc_info=True)
-        asyncio.create_task(_bg_summarize(doc.id, body.content_md))
+        # 向量化放后台：本地 BGE 编码需要数秒，不应阻塞保存请求
+        # （_bg_vectorize 结束时会顺带生成摘要和自动标签）
+        asyncio.create_task(_bg_vectorize(doc.id, body.content_md))
 
-    if content_changed or body.title is not None:
+    if title_changed:
+        # 标题变了会影响其它文档对它的引用，只能全量重建
         _schedule_links_rebuild()
+    elif content_changed:
+        # 只有本文的出边可能变化
+        _schedule_links_rebuild_for(doc.id)
 
     result = await session.execute(
         select(Document).where(Document.id == doc_id).options(selectinload(Document.tags))
@@ -376,7 +429,8 @@ async def delete_document(doc_id: int, session: AsyncSession = Depends(get_sessi
     await session.commit()
 
     await fts_delete_async(doc_id)
-    await delete_by_document_async(doc_id)
+    # 向量索引保留到「彻底删除」再清理：恢复时无需重建，RAG 侧已按 is_deleted 过滤
+    await recompute_tag_usage(session)
     _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
@@ -396,6 +450,9 @@ async def restore_document(doc_id: int, session: AsyncSession = Depends(get_sess
     await session.commit()
 
     await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
+    await ensure_document_vectors(doc.id, doc.content_md or "")
+    await recompute_tag_usage(session)
+    _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok"}
 
@@ -428,7 +485,7 @@ async def reparse_document(doc_id: int, session: AsyncSession = Depends(get_sess
         doc.parse_status = status
         doc.word_count = len(md_content)
 
-        if settings.AI_API_KEY and md_content:
+        if md_content and embedding_available():
             await _do_chunk_and_vectorize(session, doc.id, md_content)
 
         session.add(DocumentVersion(
@@ -438,9 +495,11 @@ async def reparse_document(doc_id: int, session: AsyncSession = Depends(get_sess
         ))
     except ParseError as e:
         doc.parse_status = "failed"
+        await session.commit()
         raise HTTPException(status_code=500, detail=str(e))
 
     await session.commit()
+    await _prune_versions(session, doc.id)
 
     await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
     _schedule_links_rebuild()
@@ -472,27 +531,44 @@ async def reindex_document(doc_id: int, session: AsyncSession = Depends(get_sess
     return {"code": 0, "msg": "ok", "chunks": cn}
 
 
+async def _reindex_all_bg(doc_ids: list[int]):
+    """后台批量重建索引（串行，避免同时压满 CPU）"""
+    total_chunks = 0
+    async with async_session() as session:
+        for doc_id in doc_ids:
+            try:
+                doc = await session.get(Document, doc_id)
+                if not doc or doc.is_deleted or not doc.content_md:
+                    continue
+                cn = await _do_chunk_and_vectorize(session, doc_id, doc.content_md)
+                total_chunks += cn
+                await fts_upsert_async(doc_id, doc.title, doc.content_md)
+                logger.info(f"文档 {doc_id} ({doc.title}) 索引完成, {cn} 个片段")
+            except Exception as e:
+                logger.error(f"文档 {doc_id} 索引失败: {e}")
+    logger.info(f"批量重建完成: {len(doc_ids)} 篇 / {total_chunks} 个片段")
+
+
 @router.post("/reindex-all")
 async def reindex_all_documents(session: AsyncSession = Depends(get_session)):
+    """批量重建索引改为后台执行，文档多时不会把请求挂住"""
     if not embedding_available():
         raise HTTPException(status_code=400, detail="未配置 Embedding（本地 BGE 或 API Key）")
 
     result = await session.execute(
-        select(Document).where(Document.is_deleted == False, Document.content_md != None)
+        select(Document.id).where(Document.is_deleted == False, Document.content_md != None)
     )
-    docs = result.scalars().all()
+    doc_ids = list(result.scalars().all())
+    if not doc_ids:
+        return {"code": 0, "msg": "没有需要重建索引的文档", "documents": 0, "chunks": 0}
 
-    total_chunks = 0
-    for doc in docs:
-        try:
-            cn = await _do_chunk_and_vectorize(session, doc.id, doc.content_md or "")
-            total_chunks += cn
-            await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
-            logger.info(f"文档 {doc.id} ({doc.title}) 索引完成, {cn} 个片段")
-        except Exception as e:
-            logger.error(f"文档 {doc.id} 索引失败: {e}")
-
-    return {"code": 0, "msg": "ok", "documents": len(docs), "chunks": total_chunks}
+    asyncio.create_task(_reindex_all_bg(doc_ids))
+    return {
+        "code": 0,
+        "msg": f"已在后台开始重建 {len(doc_ids)} 篇文档的索引，稍后刷新即可",
+        "documents": len(doc_ids),
+        "chunks": 0,
+    }
 
 
 @router.post("/batch-delete")
@@ -525,8 +601,8 @@ async def batch_delete_documents(
 
     for doc_id in deleted_ids:
         await fts_delete_async(doc_id)
-        await delete_by_document_async(doc_id)
 
+    await recompute_tag_usage(session)
     _schedule_links_rebuild()
 
     return {"code": 0, "msg": "ok", "deleted": len(deleted_ids)}
@@ -693,6 +769,7 @@ async def restore_version(doc_id: int, version_id: int, session: AsyncSession = 
         version_note=f"回滚到版本 #{version.id}",
     ))
     await session.commit()
+    await _prune_versions(session, doc.id)
 
     await fts_upsert_async(doc.id, doc.title, doc.content_md)
 

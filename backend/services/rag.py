@@ -1,4 +1,6 @@
 import logging
+import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .embedding import embedding_service
@@ -60,33 +62,41 @@ def build_direct_messages(question: str, history: list[dict] | None = None) -> l
     return messages
 
 
+SINGLE_DOC_FULL_LIMIT = 12000     # 不超过该长度的文档直接全文塞进 prompt
+SINGLE_DOC_SNIPPET_K = 6          # 长文档在文档内部检索的片段数
+RAG_CANDIDATE_FACTOR = 4          # 向量召回放大倍数（软删除文档的向量仍在库里，需要跳过）
+
+
 async def retrieve_for_rag(session: AsyncSession, question: str, top_k: int = 5) -> list[dict]:
+    """跨库检索：一次 JOIN 取回片段与文档，跳过已删除文档后截断到 top_k。"""
     try:
         query_embedding = await embedding_service.get_embedding(question)
     except Exception as e:
         logger.error(f"Embedding 失败: {e}")
         return []
 
-    search_results = await search_async(query_embedding, top_k=top_k)
-    if not search_results:
+    candidates = await search_async(
+        query_embedding, top_k=max(top_k * RAG_CANDIDATE_FACTOR, 20)
+    )
+    if not candidates:
         return []
 
-    context_docs = []
-    for item in search_results:
-        chunk_result = await session.execute(
-            select(Chunk).where(Chunk.id == item["chunk_id"])
+    chunk_ids = [c["chunk_id"] for c in candidates]
+    rows = (
+        await session.execute(
+            select(Chunk, Document)
+            .join(Document, Document.id == Chunk.document_id)
+            .where(Chunk.id.in_(chunk_ids), Document.is_deleted == False)
         )
-        chunk = chunk_result.scalar_one_or_none()
-        if not chunk:
-            continue
+    ).all()
+    pairs = {chunk.id: (chunk, doc) for chunk, doc in rows}
 
-        doc_result = await session.execute(
-            select(Document).where(Document.id == item["document_id"])
-        )
-        doc = doc_result.scalar_one_or_none()
-        if not doc or doc.is_deleted:
+    context_docs: list[dict] = []
+    for item in candidates:
+        pair = pairs.get(item["chunk_id"])
+        if not pair:
             continue
-
+        chunk, doc = pair
         context_docs.append({
             "chunk_id": chunk.id,
             "document_id": doc.id,
@@ -95,9 +105,66 @@ async def retrieve_for_rag(session: AsyncSession, question: str, top_k: int = 5)
             "content": chunk.content,
             "distance": item["distance"],
         })
+        if len(context_docs) >= top_k:
+            break
 
     context_docs.sort(key=lambda x: x["distance"])
     return context_docs[:top_k]
+
+
+def _question_terms(question: str) -> list[str]:
+    """把问题拆成用于关键词兜底的词（长度 >= 2）"""
+    return [
+        t
+        for t in re.split(r"[\s,，.。？?！!、;；:：()（）\[\]【】\"'“”]+", question or "")
+        if len(t) >= 2
+    ]
+
+
+async def _retrieve_doc_chunks(
+    session: AsyncSession,
+    document_id: int,
+    question: str,
+    limit: int = SINGLE_DOC_SNIPPET_K,
+) -> list[Chunk]:
+    """在单篇文档内部检索相关片段：优先向量，失败时退化为关键词命中。"""
+    try:
+        query_embedding = await embedding_service.get_embedding(question)
+        candidates = await search_async(query_embedding, top_k=max(limit * 8, 40))
+        ids = [c["chunk_id"] for c in candidates if c["document_id"] == document_id][:limit]
+        if ids:
+            rows = (
+                await session.execute(select(Chunk).where(Chunk.id.in_(ids)))
+            ).scalars().all()
+            by_id = {c.id: c for c in rows}
+            ordered = [by_id[i] for i in ids if i in by_id]
+            if ordered:
+                return ordered
+    except Exception as e:
+        logger.warning(f"单文档向量检索失败，改用关键词匹配: {e}")
+
+    rows = (
+        await session.execute(
+            select(Chunk)
+            .where(Chunk.document_id == document_id)
+            .order_by(Chunk.chunk_index)
+        )
+    ).scalars().all()
+    if not rows:
+        return []
+
+    terms = _question_terms(question)
+    if terms:
+        def _score(chunk: Chunk) -> int:
+            text = chunk.content or ""
+            return sum(text.count(t) for t in terms)
+
+        scored = sorted(rows, key=_score, reverse=True)
+        hit = [c for c in scored[:limit] if _score(c) > 0]
+        if hit:
+            return hit
+
+    return rows[:limit]
 
 
 async def build_single_doc_messages(
@@ -106,6 +173,7 @@ async def build_single_doc_messages(
     question: str,
     history: list[dict] | None = None,
 ) -> list[dict]:
+    """指定文档问答：短文档给全文，长文档在文档内部检索相关片段。"""
     doc_result = await session.execute(
         select(Document).where(Document.id == document_id)
     )
@@ -114,17 +182,41 @@ async def build_single_doc_messages(
         raise ValueError(f"文档不存在: {document_id}")
 
     content = doc.content_md or ""
+    system_prompt = (
+        f"你是一个文档助手，请严格基于文档《{doc.title}》的内容回答问题。"
+        "如果提供的文档内容中没有相关信息，请明确说明“文档中未找到相关内容”，不要编造。"
+    )
 
-    messages: list[dict] = [
-        {"role": "system", "content": f"你是一个文档助手，请严格基于文档《{doc.title}》的内容回答问题。如果文档中没有相关内容，请明确说明。"}
-    ]
+    if len(content) <= SINGLE_DOC_FULL_LIMIT:
+        user_content = f"文档《{doc.title}》全文：\n\n{content}\n\n问题：{question}"
+    else:
+        chunks = await _retrieve_doc_chunks(session, document_id, question)
+        if chunks:
+            parts = []
+            for c in chunks:
+                header = f"📄 {doc.title}"
+                if c.section_path:
+                    header += f" > {c.section_path}"
+                parts.append(f"{header}\n{c.content}")
+            excerpts = "\n\n---\n\n".join(parts)
+            user_content = (
+                f"《{doc.title}》全文约 {len(content)} 字，较长，以下是检索到的 "
+                f"{len(chunks)} 个最相关片段（按相关度排序），请基于这些片段回答：\n\n"
+                f"{excerpts}\n\n---\n\n【用户问题】\n{question}"
+            )
+        else:
+            # 没有切片（尚未索引）时退化为开头部分，并在提示里注明，避免 AI 误以为读到了全文
+            user_content = (
+                f"文档《{doc.title}》较长（约 {len(content)} 字），当前仅提供开头 "
+                f"{SINGLE_DOC_FULL_LIMIT} 字：\n\n{content[:SINGLE_DOC_FULL_LIMIT]}\n\n"
+                f"【用户问题】\n{question}"
+            )
+
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     if history:
         for msg in history[-10:]:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-    messages.append({
-        "role": "user",
-        "content": f"文档内容：\n\n{content[:12000]}\n\n问题：{question}",
-    })
+    messages.append({"role": "user", "content": user_content})
     return messages

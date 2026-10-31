@@ -20,11 +20,13 @@ def build_fts_query(q: str) -> tuple[str | None, list[str]]:
     FTS 索引使用 trigram 分词器（中文子串匹配）：
     - 长度 >= 3 的词走 MATCH（子串命中，可高亮）
     - 长度 1-2 的词 MATCH 不生效，走 LIKE 兜底
+    - 特殊字符（连字符、引号等）按分隔符处理：直接删掉会把
+      "验证文档-临时" 拼成不存在的 trigram，导致整条查询搜不到
     """
     long_terms: list[str] = []
     short_terms: list[str] = []
-    for raw in q.split():
-        term = _FTS_SPECIAL.sub("", raw).strip()
+    for raw in _FTS_SPECIAL.sub(" ", q).split():
+        term = raw.strip()
         if not term:
             continue
         if len(term) >= 3:
@@ -33,6 +35,11 @@ def build_fts_query(q: str) -> tuple[str | None, list[str]]:
             short_terms.append(term)
     match_clause = " AND ".join(long_terms) if long_terms else None
     return match_clause, short_terms
+
+
+def _escape_like(term: str) -> str:
+    """转义 LIKE 通配符，避免用户输入的 % 匹配到所有文档"""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _make_snippet(text: str, terms: list[str], radius: int = 60) -> str:
@@ -85,10 +92,12 @@ async def fulltext_search(
     for i, term in enumerate(short_terms):
         p_title, p_content = f"t{i}_title", f"t{i}_content"
         conditions.append(
-            f"(documents_fts.title LIKE :{p_title} OR documents_fts.content_md LIKE :{p_content})"
+            f"(documents_fts.title LIKE :{p_title} ESCAPE '\\' "
+            f"OR documents_fts.content_md LIKE :{p_content} ESCAPE '\\')"
         )
-        params[p_title] = f"%{term}%"
-        params[p_content] = f"%{term}%"
+        escaped = _escape_like(term)
+        params[p_title] = f"%{escaped}%"
+        params[p_content] = f"%{escaped}%"
 
     where_sql = " AND ".join(conditions)
 

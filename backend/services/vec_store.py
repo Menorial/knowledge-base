@@ -71,6 +71,18 @@ class VecStore:
             finally:
                 conn.close()
 
+    def has_vectors(self, document_id: int) -> bool:
+        """该文档是否已有向量（用于恢复时判断要不要补建索引）"""
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM chunk_embeddings WHERE document_id = ? LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
 
 vec_store = VecStore()
 
@@ -93,6 +105,10 @@ async def _with_retry(fn, *args, retries: int = 4):
 
 async def delete_by_document_async(document_id: int):
     await _with_retry(vec_store.delete_by_document, document_id)
+
+
+async def has_vectors_async(document_id: int) -> bool:
+    return await asyncio.to_thread(vec_store.has_vectors, document_id)
 
 
 async def bulk_add_async(items: list[tuple[int, int, list[float]]]):

@@ -1,5 +1,4 @@
 """回收站：查看软删除文档、恢复、彻底删除"""
-import asyncio
 import logging
 from pathlib import Path
 
@@ -12,20 +11,16 @@ from backend.db.database import get_session, async_session
 from backend.db.models import Document
 from backend.services.fts_sync import fts_delete_async, fts_upsert_async
 from backend.services.vec_store import delete_by_document_async
-from backend.services.links import rebuild_all_links
+from backend.services.links import schedule_rebuild
+from backend.services.tags_usage import recompute_tag_usage
+from backend.api.documents import ensure_document_vectors
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/trash", tags=["trash"])
 
 
 def _schedule_links_rebuild():
-    async def _run():
-        try:
-            async with async_session() as session:
-                await rebuild_all_links(session)
-        except Exception as e:
-            logger.error(f"链接重建失败: {e}", exc_info=True)
-    asyncio.create_task(_run())
+    schedule_rebuild(full=True)
 
 
 @router.get("")
@@ -63,6 +58,8 @@ async def restore_document(doc_id: int, session: AsyncSession = Depends(get_sess
     await session.commit()
 
     await fts_upsert_async(doc.id, doc.title, doc.content_md or "")
+    await ensure_document_vectors(doc.id, doc.content_md or "")
+    await recompute_tag_usage(session)
     _schedule_links_rebuild()
     return {"code": 0, "msg": "ok"}
 
@@ -117,6 +114,7 @@ async def purge_document(doc_id: int, session: AsyncSession = Depends(get_sessio
     await _purge_doc_db(session, doc)
     await session.commit()
     await _purge_doc_index(doc_id)
+    await recompute_tag_usage(session)
     return {"code": 0, "msg": "ok"}
 
 
@@ -151,7 +149,9 @@ async def batch_restore_documents(
         doc = await session.get(Document, doc_id)
         if doc:
             await fts_upsert_async(doc_id, doc.title, doc.content_md or "")
+            await ensure_document_vectors(doc_id, doc.content_md or "")
 
+    await recompute_tag_usage(session)
     _schedule_links_rebuild()
     return {"code": 0, "msg": "ok", "restored": len(restored_ids)}
 
@@ -185,4 +185,5 @@ async def batch_purge_documents(
     for doc in docs:
         await _purge_doc_index(doc.id)
 
+    await recompute_tag_usage(session)
     return {"code": 0, "msg": "ok", "purged": len(docs)}

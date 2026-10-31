@@ -4,20 +4,22 @@
 - `syntax`：文档中显式写 `[[目标标题]]`
 - `auto`：正文中出现其他文档的标题（自动匹配，最长优先，跳过代码块与已占用的区间）
 
-全量重建会串行化执行（threading.Lock），避免并发编辑时互相覆盖。
+全量重建会串行化执行（asyncio.Lock），避免并发编辑时互相覆盖。
 """
+import asyncio
 import logging
 import re
 import threading
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..db.database import async_session
 from ..db.models import Document, DocumentLink
+from ..utils.loop_lock import loop_lock
 
 logger = logging.getLogger(__name__)
 
-_rebuild_lock = threading.Lock()
 
 _SYNTAX_RE = re.compile(r"\[\[([^\[\]\n]+)\]\]")
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -98,7 +100,7 @@ def extract_links(content_md: str, own_title: str, all_titles: list[str]) -> lis
 
 async def rebuild_all_links(session: AsyncSession) -> int:
     """全量重建链接表（串行化）。返回新增链接数。"""
-    with _rebuild_lock:
+    async with loop_lock("links_rebuild"):
         result = await session.execute(
             select(Document.id, Document.title, Document.content_md).where(
                 Document.is_deleted == False
@@ -129,3 +131,87 @@ async def rebuild_all_links(session: AsyncSession) -> int:
         await session.commit()
         logger.info(f"链接重建完成，共 {len(pairs)} 条")
         return len(pairs)
+
+
+async def rebuild_links_for_document(session: AsyncSession, doc_id: int) -> int:
+    """只重建某一篇文档的出边。
+
+    正文变化时其它文档的标题集合没变，没必要整表重扫 —— 这是编辑文档最常走的路径。
+    """
+    async with loop_lock("links_rebuild"):
+        rows = (
+            await session.execute(
+                select(Document.id, Document.title, Document.content_md).where(
+                    Document.is_deleted == False
+                )
+            )
+        ).all()
+
+        await session.execute(delete(DocumentLink).where(DocumentLink.from_doc_id == doc_id))
+
+        doc = next((r for r in rows if r[0] == doc_id), None)
+        if doc is None:
+            await session.commit()
+            return 0
+
+        title_to_id = {row[1]: row[0] for row in rows}
+        titles = list(title_to_id.keys())
+        added = 0
+        seen: set[int] = set()
+        for target_title, source in extract_links(doc[2], doc[1], titles):
+            target_id = title_to_id.get(target_title)
+            if not target_id or target_id == doc_id or target_id in seen:
+                continue
+            seen.add(target_id)
+            session.add(DocumentLink(from_doc_id=doc_id, to_doc_id=target_id, source=source))
+            added += 1
+
+        await session.commit()
+        logger.info(f"文档 {doc_id} 链接重建完成，共 {added} 条")
+        return added
+
+
+# ---- 重建调度：把短时间内的多次请求合并成一次，避免 N 次上传触发 N 次全表扫描 ----
+
+_sched_guard = threading.Lock()
+_pending_full = False
+_pending_docs: set[int] = set()
+_worker: "asyncio.Task | None" = None
+
+
+def schedule_rebuild(full: bool = False, doc_id: int | None = None) -> None:
+    """把重建请求排进队列；真正执行时合并连续请求。"""
+    global _pending_full, _worker
+    with _sched_guard:
+        if full:
+            _pending_full = True
+        elif doc_id is not None:
+            _pending_docs.add(doc_id)
+        else:
+            return
+        if _worker is None or _worker.done():
+            _worker = asyncio.create_task(_drain_rebuilds())
+
+
+async def _drain_rebuilds() -> None:
+    global _pending_full
+    while True:
+        with _sched_guard:
+            if _pending_full:
+                full, docs = True, set()
+                _pending_full = False
+                _pending_docs.clear()
+            elif _pending_docs:
+                full, docs = False, set(_pending_docs)
+                _pending_docs.clear()
+            else:
+                return
+        try:
+            async with async_session() as session:
+                if full:
+                    await rebuild_all_links(session)
+                else:
+                    for doc_id in docs:
+                        await rebuild_links_for_document(session, doc_id)
+        except Exception as e:
+            logger.error(f"链接重建失败: {e}", exc_info=True)
