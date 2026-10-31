@@ -149,35 +149,10 @@
 
 ### 3.1 整体架构图
 
-渲染版本见 [`docs/architecture.svg`](docs/architecture.svg)（README 中的 PNG 由它导出）。
-下面是可编辑的 Mermaid 源，便于随实现调整：
+![系统架构](docs/architecture.png)
 
-```mermaid
-flowchart LR
-    subgraph 前端["Vue3 前端 (5173)"]
-        UI[文档管理 / AI对话 / 搜索 / 图谱<br/>Element Plus + ECharts + d3-force]
-    end
-
-    subgraph 后端["FastAPI 后端 (8000)"]
-        API[API 层<br/>documents / chat / search / tags<br/>trash / system / graph / stats]
-        SVC[服务层<br/>parser → chunker → clipper<br/>embedding / vec_store / fts_sync<br/>rag / llm / links / backup / autotag]
-    end
-
-    subgraph 存储["SQLite + 文件系统"]
-        DB[(knowledge.db<br/>documents + chunks + tags + messages<br/>FTS5 trigram 全文索引)]
-        VEC[(chunk_embeddings<br/>sqlite-vec 向量表)]
-        FILES[data/files<br/>原始文件 + 剪藏图片]
-    end
-
-    LLM[LLM API<br/>DeepSeek / OpenAI / 通义<br/>Embedding: 本地 BGE 模型]
-
-    UI <-->|REST + SSE 流式| API
-    API --> SVC
-    SVC --> DB
-    SVC --> VEC
-    SVC --> FILES
-    SVC <--> LLM
-```
+> 前端只通过 REST / SSE 访问后端；文档、切片、向量索引与原始文件全部保存在本机。
+> 源文件是矢量图 [`docs/architecture.svg`](docs/architecture.svg)，改图后重新导出 PNG 即可。
 
 ### 3.2 项目目录结构
 
