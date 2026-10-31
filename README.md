@@ -541,7 +541,9 @@ npm config set registry https://registry.npmmirror.com
 2. 把 `data/` 和 `.env` 拷到新机器；
 3. 新机器装好依赖后启动即可。
 
-> ⚠️ 不要用 git 同步 `data/`。一旦提交，文档就进了 Git 历史，之后再开源也无法彻底撤回。
+> ⚠️ SQLite 是单写者，`knowledge.db` 又是二进制文件，没有可合并的冲突解决方式。
+> 不要同时用两台机器操作同一份数据库；也不要用 git 同步 `data/`——一旦提交，
+> 文档就进了 Git 历史，之后无法彻底撤回。
 
 ## 📄 License
 
