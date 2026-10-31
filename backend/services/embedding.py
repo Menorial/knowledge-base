@@ -5,10 +5,11 @@ import threading
 import concurrent.futures
 import numpy as np
 
-# 默认使用国内镜像（用户也可通过环境变量覆盖）
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-
 from backend.config import settings
+
+# 默认走国内镜像，可通过 .env 的 HF_ENDPOINT 覆盖；
+# 必须在 sentence_transformers 加载前写入进程环境，所以放在模块顶部
+os.environ.setdefault("HF_ENDPOINT", settings.HF_ENDPOINT)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class EmbeddingService:
                 return
 
             # 再试 huggingface 本地缓存
-            hf_local_only = os.environ.get("BGE_OFFLINE", "0") == "1"
+            hf_local_only = settings.BGE_OFFLINE
             try:
                 self._model = SentenceTransformer("BAAI/bge-small-zh-v1.5", local_files_only=True)
                 logger.info("Loaded from local HF cache")

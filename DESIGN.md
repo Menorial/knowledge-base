@@ -607,24 +607,30 @@ WHERE embedding MATCH ? ORDER BY distance LIMIT 20;
 ### 6.1 .env 文件
 
 ```env
-# AI 接口配置
+# AI 接口
 AI_API_KEY=sk-xxxxxxxxxxxxxxxx
 AI_BASE_URL=https://api.openai.com/v1
 AI_MODEL=gpt-4o-mini
 AI_EMBEDDING_MODEL=text-embedding-3-small
-
-# 数据库
-DB_PATH=data/knowledge.db
 VECTOR_DIM=1536
 
-# 文件存储
+# 本地 Embedding（推荐，免费；把上面两行换成这两行）
+# AI_EMBEDDING_MODEL=local
+# VECTOR_DIM=512
+
+# 数据库 / 文件存储
+DB_PATH=data/knowledge.db
 FILE_STORAGE_DIR=data/files
 MAX_FILE_SIZE=20971520
-ALLOWED_EXTENSIONS=.md,.txt,.pdf,.docx
+ALLOWED_EXTENSIONS=.md,.txt,.pdf,.docx,.html
 
 # 备份
 BACKUP_DIR=backup
 BACKUP_KEEP_DAYS=7
+
+# 本地模型下载（首次约 100MB）
+HF_ENDPOINT=https://hf-mirror.com
+BGE_OFFLINE=0
 ```
 
 ### 6.2 兼容国产模型
@@ -638,11 +644,11 @@ AI_MODEL=qwen-plus
 AI_EMBEDDING_MODEL=text-embedding-v3
 VECTOR_DIM=1024
 
-# DeepSeek
-AI_BASE_URL=https://api.deepseek.com/v1
-AI_MODEL=deepseek-chat
-AI_EMBEDDING_MODEL=deepseek-embedding
-VECTOR_DIM=1024
+# DeepSeek（对话）+ 本地 Embedding（DeepSeek 不提供 embedding 接口）
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-v4-flash
+AI_EMBEDDING_MODEL=local
+VECTOR_DIM=512
 ```
 
 ---

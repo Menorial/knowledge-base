@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     BACKUP_DIR: str = "backup"
     BACKUP_KEEP_DAYS: int = 7
 
+    # 本地 Embedding 模型下载（首次约 100MB）
+    HF_ENDPOINT: str = "https://hf-mirror.com"
+    BGE_OFFLINE: bool = False
+
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
