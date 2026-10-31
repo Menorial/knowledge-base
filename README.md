@@ -52,32 +52,10 @@
 
 ## 🏗️ 系统架构
 
-```mermaid
-flowchart LR
-    subgraph 前端["Vue3 前端 (5173)"]
-        UI[文档管理 / AI对话 / 搜索 / 图谱<br/>Element Plus + ECharts + d3-force]
-    end
+![系统架构](docs/architecture.png)
 
-    subgraph 后端["FastAPI 后端 (8000)"]
-        API[API 层<br/>documents / chat / search / tags<br/>trash / system / graph / stats]
-        SVC[服务层<br/>parser → chunker → clipper<br/>embedding / vec_store / fts_sync<br/>rag / llm / links / backup / autotag]
-    end
-
-    subgraph 存储["SQLite + 文件系统"]
-        DB[(knowledge.db<br/>documents + chunks + tags + messages<br/>FTS5 trigram 全文索引)]
-        VEC[(chunk_embeddings<br/>sqlite-vec 向量表)]
-        FILES[data/files<br/>原始文件 + 剪藏图片]
-    end
-
-    LLM[LLM API<br/>DeepSeek / OpenAI / 通义<br/>Embedding: 本地 BGE 模型]
-
-    UI <-->|REST + SSE 流式| API
-    API --> SVC
-    SVC --> DB
-    SVC --> VEC
-    SVC --> FILES
-    SVC <--> LLM
-```
+> 前端只通过 REST / SSE 访问后端；文档、切片、向量索引与原始文件全部保存在本机。
+> 可编辑的矢量源文件：[docs/architecture.svg](docs/architecture.svg)
 
 **核心链路：**
 
@@ -302,6 +280,7 @@ knowledge-base/
 │       ├── api/               # 接口封装
 │       ├── router/            # 路由
 │       └── utils/             # 标签取色
+├── docs/                      # 架构图（SVG 源文件 + PNG）
 ├── tests/                     # pytest 单元测试（不依赖模型）
 ├── .github/workflows/ci.yml   # CI
 ├── data/                      # 运行时数据（.gitignore，不入库）
