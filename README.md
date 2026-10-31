@@ -33,7 +33,9 @@
 | 🤖 AI 自动打标签 | 上传/编辑后 AI 自动生成 1-5 个标签 |
 | 📝 手动编辑 | 解析错了？直接手动修正 Markdown |
 | 🔄 版本历史 | 每次修改自动存档（保留最近 30 份），可预览、可回滚 |
-| 🗑️ 回收站 | 软删除 + 恢复 + 彻底清除 |
+| 🗑️ 回收站 | 软删除 + 恢复 + 彻底清除（支持批量） |
+| 🧹 批量删除 | 列表勾选多篇，一次删除/恢复 |
+| 📤 对话导出 | 会话导出为 Markdown，支持重新生成回答 |
 | 🔗 双向链接 | 正文提到其他文档标题自动关联，`[[标题]]` 显式链接，互相可见 |
 | 🕸️ 知识图谱 | 文档关联网络可视化，可拖拽/缩放，点击直达文档 |
 | 🌐 网页剪藏 | 粘贴网址或一键书签剪藏网页，自动转 Markdown 入库 |
@@ -267,48 +269,46 @@ pip install greenlet
 
 ```
 knowledge-base/
-├── backend/                    # Python 后端
-│   ├── main.py                # FastAPI 入口（含启动自动备份）
+├── backend/
+│   ├── main.py                # FastAPI 入口（启动任务 + 静态文件 + CORS）
 │   ├── config.py              # 配置读取
 │   ├── requirements.txt
-│   ├── api/                   # API 路由
-│   │   ├── documents.py       # 文档 CRUD + 版本历史
+│   ├── api/                   # 路由
+│   │   ├── documents.py       # 文档 CRUD / 上传 / 索引 / 剪藏 / 版本
 │   │   ├── search.py          # 全文搜索（FTS5 trigram）
 │   │   ├── chat.py            # AI 对话（SSE 流式）
 │   │   ├── tags.py            # 标签管理
 │   │   ├── trash.py           # 回收站
-│   │   ├── system.py          # 设置读写 + 备份管理
 │   │   ├── graph.py           # 知识图谱数据
-│   │   └── stats.py           # 统计概览
+│   │   ├── stats.py           # 统计概览
+│   │   └── system.py          # 设置 + 备份
 │   ├── services/              # 业务服务
 │   │   ├── parser.py          # 文档解析（插件式）
 │   │   ├── chunker.py         # 语义切片
-│   │   ├── embedding.py       # Embedding 向量化（本地 BGE/API）
-│   │   ├── llm.py             # LLM 流式调用（支持热更新）
-│   │   ├── rag.py             # RAG 检索 + Prompt 组装
-│   │   ├── links.py           # 双向链接检测/重建
-│   │   └── backup.py          # 自动备份
-│   ├── db/                    # 数据层
-│   │   ├── database.py        # SQLAlchemy + sqlite-vec + FTS5
-│   │   ├── models.py          # ORM 模型
-│   │   └── schemas.py         # Pydantic Schema
-│   └── utils/                 # 工具函数
-├── frontend/                   # Vue 3 前端
-│   ├── src/
-│   │   ├── views/             # 页面组件（含 Trash 回收站）
-│   │   ├── components/        # 可复用组件
-│   │   ├── api/               # 后端接口封装
-│   │   └── stores/            # Pinia 状态管理
-│   └── vite.config.js
-├── data/                       # 运行时数据（自动创建，已被 .gitignore 忽略）
-│   ├── knowledge.db           # SQLite 数据库
-│   └── files/                 # 原始文件存储
-├── backup/                     # 自动备份目录（启动时自动生成）
-├── .env                        # AI 配置（不提交到 git）
-├── .env.example                # 配置模板
-├── .gitignore
-├── DESIGN.md                   # 完整设计文档
-├── LICENSE                     # MIT 许可证
+│   │   ├── embedding.py       # 向量化（本地 BGE / API）
+│   │   ├── vec_store.py       # sqlite-vec 封装
+│   │   ├── fts_sync.py        # FTS 索引同步
+│   │   ├── llm.py             # LLM 流式调用（热更新）
+│   │   ├── rag.py             # 检索 + Prompt 组装
+│   │   ├── links.py           # 双向链接（全量/增量/合并调度）
+│   │   ├── clipper.py         # 网页正文提取 + 图片本地化
+│   │   ├── autotag.py         # AI 自动打标签
+│   │   ├── tags_usage.py      # 标签计数重算
+│   │   └── backup.py          # 备份
+│   ├── db/                    # 数据层（引擎 / 模型 / Schema）
+│   └── utils/                 # 文件校验、事件循环锁
+├── frontend/                  # Vue 3 前端
+│   └── src/
+│       ├── views/             # 7 个页面
+│       ├── api/               # 接口封装
+│       ├── router/            # 路由
+│       └── utils/             # 标签取色
+├── tests/                     # pytest 单元测试（不依赖模型）
+├── .github/workflows/ci.yml   # CI
+├── data/                      # 运行时数据（.gitignore，不入库）
+├── backup/                    # 自动备份（.gitignore）
+├── .env.example               # 配置模板
+├── DESIGN.md                  # 架构设计文档
 └── README.md
 ```
 
@@ -335,6 +335,8 @@ javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+
 
 ## 🔌 API 速查
 
+完整定义见运行后的 <http://localhost:8000/docs>。
+
 ### 文档
 
 | 方法 | 路径 | 说明 |
@@ -347,14 +349,27 @@ javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+
 | PUT | `/api/documents/{id}` | 更新文档（标题/Markdown） |
 | DELETE | `/api/documents/{id}` | 软删除 |
 | POST | `/api/documents/{id}/restore` | 恢复已删除 |
+| POST | `/api/documents/batch-delete` | 批量软删除 |
 | POST | `/api/documents/{id}/reparse` | 重新解析 |
 | POST | `/api/documents/{id}/reindex` | 重建向量索引 |
-| POST | `/api/documents/reindex-all` | 批量重建全部索引 |
-| POST | `/api/documents/create-text` | 在线新建 Markdown 文档 |
+| POST | `/api/documents/reindex-all` | 批量重建（**后台执行**） |
+| POST | `/api/documents/create-text` | 在线新建 Markdown |
 | POST | `/api/documents/clip` | 网页剪藏（URL 或 HTML） |
-| GET | `/api/documents/{id}/versions` | 版本历史列表 |
+| GET | `/api/documents/{id}/links` | 双向链接 |
+| GET | `/api/documents/{id}/versions` | 版本历史 |
 | GET | `/api/documents/{id}/versions/{vid}` | 版本内容 |
 | POST | `/api/documents/{id}/versions/{vid}/restore` | 回滚到某版本 |
+
+### 标签
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/tags` | 标签列表 |
+| POST | `/api/tags` | 新建标签 |
+| PUT | `/api/tags/{id}` | 重命名 / 改色 |
+| DELETE | `/api/tags/{id}` | 删除标签 |
+| POST | `/api/tags/document/{doc_id}` | 给文档加标签（标签名数组） |
+| DELETE | `/api/tags/document/{doc_id}/{tag_id}` | 移除标签 |
 
 ### 回收站
 
@@ -362,31 +377,17 @@ javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+
 |------|------|------|
 | GET | `/api/trash` | 已删除文档列表 |
 | POST | `/api/trash/{id}/restore` | 恢复文档 |
-| DELETE | `/api/trash/{id}` | 彻底删除（含原始文件） |
+| DELETE | `/api/trash/{id}` | 彻底删除（含文件与向量） |
+| POST | `/api/trash/batch-restore` | 批量恢复 |
+| POST | `/api/trash/batch-purge` | 批量彻底删除 |
 
-### 双向链接 / 图谱
+### 搜索 / 图谱 / 统计
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/documents/{id}/links` | 文档双向链接（引用/被引用） |
+| GET | `/api/search?q=xxx&page=1` | 全文搜索（FTS5 + 高亮） |
 | GET | `/api/graph` | 知识图谱节点与边 |
-
-### 系统
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/settings` | 读取当前配置（API Key 打码） |
-| PUT | `/api/settings` | 保存配置到 .env 并热生效 |
-| POST | `/api/backup` | 立即备份 |
-| GET | `/api/backups` | 备份列表 |
-| DELETE | `/api/backups/{name}` | 删除备份 |
-| POST | `/api/stats/test-llm` | 测试 AI 连接 |
-
-### 搜索
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/search?q=xxx` | 全文搜索（FTS5 + 高亮） |
+| GET | `/api/stats/overview` | 统计概览 |
 
 ### AI 对话
 
@@ -394,14 +395,25 @@ javascript:(function(){var u=location.href,t=document.title,h='<!DOCTYPE html>'+
 |------|------|------|
 | GET | `/api/conversations` | 会话列表 |
 | POST | `/api/conversations` | 新建会话 |
-| POST | `/api/chat/stream` | 指定文档对话（SSE 流式） |
-| POST | `/api/chat/rag` | RAG 知识库问答（SSE 流式） |
+| GET | `/api/conversations/{id}` | 会话详情 |
+| PUT | `/api/conversations/{id}` | 改标题 / 模式 |
+| DELETE | `/api/conversations/{id}` | 删除会话 |
+| GET | `/api/conversations/{id}/export` | 导出 Markdown |
+| POST | `/api/conversations/{id}/regenerate/{msg_id}` | 重新生成回答 |
+| POST | `/api/chat/direct` | 纯 AI 对话（SSE） |
+| POST | `/api/chat/stream` | 指定文档对话（SSE） |
+| POST | `/api/chat/rag` | RAG 知识库问答（SSE） |
 
-### 健康检查
+### 系统
 
-```
-GET /api/health → {"status": "ok", "version": "1.0.0"}
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET / PUT | `/api/settings` | 读取 / 保存配置（热生效） |
+| POST | `/api/backup` | 立即备份 |
+| GET | `/api/backups` | 备份列表 |
+| DELETE | `/api/backups/{name}` | 删除备份 |
+| POST | `/api/stats/test-llm` | 测试 AI 连接 |
+| GET | `/api/health` | 健康检查 |
 
 ## 🧪 快速测试（Python）
 
@@ -445,6 +457,9 @@ print(httpx.get(f"{BASE}/api/search", params={"q": "测试"}).json())
 | sqlite-vec 扩展 | 向量检索依赖 sqlite-vec，已随 pip 依赖安装，无需手动配置 |
 | 数据备份 | 启动时自动备份到 `backup/`，保留 `BACKUP_KEEP_DAYS` 天；也可在设置页手动备份 |
 | 文件大小限制 | 默认 20MB，可在 `.env` 中修改 `MAX_FILE_SIZE` |
+| 索引是异步的 | 上传/编辑后切片与向量化在后台执行，完成后刷新即可；批量重建索引同理 |
+| 版本历史 | 每篇保留最近 30 份，更早的会被自动清理 |
+| 链接重建 | 正文编辑只重建该文档的关联，改标题/删除/恢复才全量重建 |
 
 ## ❓ 常见问题
 
@@ -533,27 +548,28 @@ npm config set registry https://registry.npmmirror.com
 
 ```
 ✅ 第一阶段：能存能看
-   └─ 文档上传 → 解析 → 存储 → 列表 → 预览 → 删除
+   └─ 上传 → 解析 → 存储 → 列表 → 预览 → 删除
 
-✅ 第二阶段：能问（AI 能力）
+✅ 第二阶段：能问（AI）
    ├─ 向量化 + sqlite-vec 检索
-   ├─ 指定文档 AI 问答（SSE 流式）
-   ├─ RAG 跨库语义问答
-   └─ 多轮对话 + 会话管理
+   ├─ 指定文档问答 / 跨库 RAG（SSE 流式 + 引用）
+   └─ 多轮对话 + 会话管理（导出 / 重新生成）
 
 ✅ 第三阶段：好用
-   ├─ 全文搜索高亮（trigram 中文子串匹配）
-   ├─ 标签系统
-   ├─ 版本历史 + 回滚
-   ├─ 回收站（恢复/彻底删除）
-   ├─ 自动备份（启动 + 手动，保留 N 天）
-   ├─ AI 自动摘要
-   ├─ 设置热更新（网页改配置即时生效）
+   ├─ 全文搜索（trigram 中文子串 + 高亮 + 分页）
+   ├─ 标签系统 + AI 自动打标签 + 自动配色
+   ├─ 版本历史 + 回滚（保留 30 份）
+   ├─ 回收站 + 批量操作
    ├─ 双向链接 + 知识图谱
-   └─ 网页剪藏（URL 剪藏 + 一键书签）
+   └─ 网页剪藏（正文提取 + 图片本地化 + 书签小工具）
+
+✅ 第四阶段：稳定性
+   ├─ 修复链接重建死锁、并发索引丢失
+   ├─ 索引/统计/标签计数一致性收敛
+   └─ 单元测试 + CI
 
 📋 后续规划
-   ├─ 全文搜索 + 向量检索混合排序
+   ├─ 全文 + 向量混合排序（RRF）
    └─ 移动端适配
 ```
 

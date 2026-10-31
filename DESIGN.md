@@ -1,9 +1,9 @@
 # 个人知识库系统 — 功能与架构设计文档
 
-> 版本：v1.0  
-> 日期：2026-08-06
-
----
+> 版本：v1.7
+> 日期：2026-10-31
+>
+> 本文档描述**当前实现**（以代码为准）。历次功能演进见[第九节](#九更新记录)。
 
 ## 一、项目概述
 
@@ -30,16 +30,17 @@
 
 | 层 | 选型 | 说明 |
 |----|------|------|
-| 后端 | Python 3.11+ / FastAPI | AI 生态最完善 |
-| 前端 | Vue 3 + Vite | SPA，纯本地运行 |
-| 关系数据库 | SQLite 3 | 文档元数据、对话、标签 |
-| 向量数据库 | sqlite-vec | RAG 语义检索，与主库同文件 |
-| 全文检索 | SQLite FTS5 | 中文支持 |
-| AI 接口 | OpenAI 兼容 API | GPT / 通义 / DeepSeek 均可 |
-| 文档解析 | python-docx + PyMuPDF + html2text | 按格式选解析器 |
-| Markdown 渲染 | 前端 markdown-it | 实时预览 |
-
----
+| 后端 | Python 3.11+ / FastAPI | 异步 IO，AI 生态完善 |
+| 前端 | Vue 3 / Vite / Element Plus | SPA，纯本地运行 |
+| 关系数据库 | SQLite 3（WAL） | 文档、切片、标签、会话、版本、链接 |
+| 全文检索 | SQLite FTS5（trigram） | 中文子串匹配；1–2 字走 LIKE 兜底 |
+| 向量检索 | sqlite-vec（vec0） | 与主库同文件，无额外服务 |
+| Embedding | 本地 BGE-small-zh（512 维）/ OpenAI 兼容 API | `AI_EMBEDDING_MODEL=local` 即全本地 |
+| LLM | OpenAI 兼容接口 | DeepSeek / OpenAI / 通义等 |
+| 文档解析 | PyMuPDF、python-docx、html2text、readability-lxml | 按格式选解析器 |
+| 前端渲染 | markdown-it + highlight.js + DOMPurify | 渲染并净化 |
+| 可视化 | ECharts（统计）、d3-force（图谱） | 仪表盘与知识图谱 |
+| 测试 | pytest | 纯函数用例，CI 不装模型 |
 
 ## 二、功能设计
 
@@ -195,76 +196,53 @@
 ```
 知识库/
 ├── backend/
-│   ├── main.py                    # FastAPI 应用入口
-│   ├── config.py                  # 配置读取（.env）
-│   ├── requirements.txt
-│   │
-│   ├── api/                       # 路由层
-│   │   ├── __init__.py
-│   │   ├── documents.py           # 文档 CRUD
-│   │   ├── search.py              # 全文搜索
-│   │   ├── chat.py                # AI 对话
-│   │   └── upload.py              # 文件上传
-│   │
-│   ├── services/                  # 业务逻辑层
-│   │   ├── __init__.py
-│   │   ├── parser.py              # 文档解析（插件式）
-│   │   ├── chunker.py             # 文本切片
-│   │   ├── embedding.py           # Embedding 服务
-│   │   ├── llm.py                 # LLM 调用（流式）
-│   │   ├── rag.py                 # RAG 检索 + Prompt 组装
-│   │   ├── backup.py              # 自动备份
-│   │   └── tasks.py               # 异步后台任务
-│   │
-│   ├── db/                        # 数据层
-│   │   ├── __init__.py
-│   │   ├── database.py            # SQLAlchemy 初始化
-│   │   ├── models.py              # ORM 模型
-│   │   ├── schemas.py             # Pydantic Schema
-│   │   └── vec_store.py           # sqlite-vec 封装
-│   │
+│   ├── main.py                 # 入口：lifespan 启动任务 + 静态文件 + CORS
+│   ├── config.py               # pydantic-settings 读取 .env
+│   ├── api/                    # 路由层
+│   │   ├── documents.py        # 上传/CRUD/解析/索引/剪藏/版本
+│   │   ├── search.py           # FTS5 trigram 检索
+│   │   ├── chat.py             # 三种对话模式 + SSE + 导出/重新生成
+│   │   ├── tags.py             # 标签 CRUD
+│   │   ├── trash.py            # 回收站（恢复/彻底删除/批量）
+│   │   ├── graph.py            # 知识图谱数据
+│   │   ├── stats.py            # 概览统计 + 连通性测试
+│   │   └── system.py           # 设置读写 + 备份管理
+│   ├── services/
+│   │   ├── parser.py           # 解析器插件
+│   │   ├── chunker.py          # 语义切片
+│   │   ├── embedding.py        # 本地 BGE / API Embedding
+│   │   ├── vec_store.py        # sqlite-vec 封装 + 写锁
+│   │   ├── fts_sync.py         # FTS 索引同步
+│   │   ├── llm.py              # OpenAI 兼容流式客户端（支持热更新）
+│   │   ├── rag.py              # 检索 + Prompt 组装 + 长文档片段检索
+│   │   ├── links.py            # 双向链接：提取/全量/增量/合并调度
+│   │   ├── clipper.py          # 网页正文提取 + 图片本地化
+│   │   ├── autotag.py          # AI 自动打标签
+│   │   ├── tags_usage.py       # 标签计数重算
+│   │   └── backup.py           # SQLite 在线备份
+│   ├── db/
+│   │   ├── database.py         # 引擎、WAL、FTS/向量表初始化与迁移
+│   │   ├── models.py           # ORM 模型
+│   │   └── schemas.py          # Pydantic Schema
 │   └── utils/
-│       ├── __init__.py
-│       └── security.py            # 文件校验、重命名
+│       ├── security.py         # 文件校验 / uuid 重命名
+│       └── loop_lock.py        # 按事件循环取 asyncio.Lock
 │
 ├── frontend/
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── index.html
+│   ├── package.json / vite.config.js / index.html
 │   └── src/
-│       ├── App.vue
-│       ├── main.js
-│       ├── style.css
-│       ├── api/                   # 后端接口封装
-│       │   ├── documents.js
-│       │   ├── chat.js
-│       │   └── search.js
-│       ├── components/
-│       │   ├── DocumentList.vue
-│       │   ├── DocumentView.vue
-│       │   ├── MarkdownPreview.vue
-│       │   ├── ChatPanel.vue
-│       │   ├── ChatMessage.vue
-│       │   ├── TagInput.vue
-│       │   └── SearchBar.vue
-│       ├── views/
-│       │   ├── Documents.vue
-│       │   ├── Chat.vue
-│       │   └── Settings.vue
-│       └── stores/                # Pinia 状态管理
-│           ├── documents.js
-│           └── chat.js
+│       ├── App.vue / main.js / theme.js
+│       ├── api/index.js        # 所有接口封装
+│       ├── router/index.js     # 7 个页面路由
+│       ├── utils/tagColor.js   # 标签稳定取色
+│       └── views/              # Dashboard / Documents / Chat / Search / Graph / Trash / Settings
 │
-├── data/                          # 运行时数据（加入 .gitignore）
-│   ├── knowledge.db              # SQLite 主库
-│   └── files/                    # 原始文件存储
-│
-├── backup/                        # 自动备份目录
-│
-├── .env                           # 环境变量（不入 git）
-├── .env.example                   # 环境变量模板
-├── .gitignore
-└── DESIGN.md                      # 本文档
+├── tests/                      # pytest 单元测试（纯函数，不依赖模型）
+├── .github/workflows/ci.yml    # CI
+├── data/                       # 运行时数据（.gitignore）
+├── backup/                     # 备份目录（.gitignore）
+├── .env / .env.example
+└── DESIGN.md
 ```
 
 ### 3.3 关键设计决策
@@ -355,128 +333,163 @@ async def chat_stream(request: ChatRequest):
 
 ---
 
+#### 3.3.5 并发与锁模型
+
+SQLite 是单写者模型，本项目用三层机制避免写冲突和数据错乱：
+
+| 层 | 机制 | 作用 |
+|----|------|------|
+| 连接层 | WAL 模式 + `timeout=30` + `_with_retry` | 写等待与短暂重试，避免 `database is locked` |
+| 原生 sqlite3 写 | 进程内 `threading.Lock`（`vec_store.db_write_lock`） | 串行化向量表 / FTS 的写入（这些调用跑在 `asyncio.to_thread` 里，不阻塞事件循环） |
+| 业务级 | `loop_lock("links_rebuild")`、`loop_lock(f"index:{doc_id}")` | 链接重建互斥；同一文档的索引重建串行 |
+
+**为什么需要 `loop_lock`**：`threading.Lock` 如果在 `async` 函数里跨 `await` 持有，
+第二个协程会阻塞事件循环线程，导致持锁协程永远无法恢复（死锁）；
+而模块级 `asyncio.Lock()` 在同一进程的多个事件循环里复用会报
+"bound to a different event loop"。所以按「事件循环 + 名字」取锁，见 `utils/loop_lock.py`。
+
+**索引写入为什么必须按文档串行**：重建流程是「删 chunk → 插 chunk → 插向量」，
+SQLite 会复用被删掉的最大 rowid，两个并发任务拿到相同 chunk id 就会撞
+`chunk_embeddings` 主键，表现为向量索引静默丢失。
+
+#### 3.3.6 后台任务与索引一致性
+
+| 动作 | 同步部分 | 后台部分 |
+|------|----------|----------|
+| 上传 | 校验、落盘、解析、写库、FTS | 切片 + 向量化 → 摘要 → 自动标签 |
+| 编辑正文 | 写库、版本快照、FTS | 向量化 → 摘要（不阻塞保存） |
+| 批量重建索引 | 立即返回 | 逐篇重建，完成后刷新可见 |
+| 链接重建 | — | 全量或按文档增量，请求会合并 |
+| 启动 | 建表/迁移、WAL | 备份、链接重建、标签计数校正、模型预热 |
+
+- 软删除只清理 FTS，**保留** chunk 与向量，恢复时无需重建；彻底删除才清理。
+- RAG 检索在 SQL 层过滤 `is_deleted`，并多召回一些再截断，避免删除文档占用名额。
+- 版本历史每篇保留最近 **30** 份。
+- 标签 `usage_count` 是冗余字段，所有关联变更后统一重算（`services/tags_usage.py`）。
+
 ## 四、数据库设计
 
 ### 4.1 表结构
 
 ```sql
--- ==================== 文档表 ====================
+-- ==================== 文档 ====================
 CREATE TABLE documents (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     title           TEXT NOT NULL,
-    file_path       TEXT,                -- 原始文件相对路径：files/uuid.pdf
-    content_md      TEXT,                -- Markdown 版本（AI + 搜索用）
-    file_type       TEXT,                -- md / pdf / docx / html / txt
-    file_size       INTEGER DEFAULT 0,   -- 原文件大小（字节）
-    parse_status    TEXT DEFAULT 'pending',  -- pending / processing / success / partial / failed
-    summary         TEXT,                -- AI 自动摘要
-    word_count      INTEGER DEFAULT 0,
+    file_path       TEXT,                    -- files/uuid.pdf；剪藏与在线创建为 NULL
+    content_md      TEXT,                    -- Markdown 版本（AI + 搜索用）
+    file_type       TEXT,                    -- md / txt / pdf / docx / html / clip
+    file_size       INTEGER DEFAULT 0,
+    parse_status    TEXT DEFAULT 'pending',  -- pending/processing/success/partial/failed
+    summary         TEXT,                    -- AI 自动摘要
+    word_count      INTEGER DEFAULT 0,       -- 实际存的是字符数
+    source_url      TEXT,                    -- 网页剪藏来源（旧库启动时自动 ALTER 添加）
     is_deleted      INTEGER DEFAULT 0,
     deleted_at      DATETIME,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at      DATETIME,
+    updated_at      DATETIME
 );
 
-CREATE INDEX idx_documents_title ON documents(title);
-CREATE INDEX idx_documents_created ON documents(created_at);
-CREATE INDEX idx_documents_deleted ON documents(is_deleted);
-
--- ==================== 文档版本历史 ====================
+-- ==================== 版本历史（每篇保留最近 30 份）====================
 CREATE TABLE document_versions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id     INTEGER NOT NULL,
+    document_id     INTEGER NOT NULL REFERENCES documents(id),
     content_md      TEXT,
-    version_note    TEXT,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (document_id) REFERENCES documents(id)
+    version_note    TEXT,                    -- 初始版本 / 自动保存 / 重新解析 / 回滚到版本 #n
+    created_at      DATETIME
 );
-
-CREATE INDEX idx_versions_doc ON document_versions(document_id);
 
 -- ==================== 标签 ====================
 CREATE TABLE tags (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT UNIQUE NOT NULL,
     color           TEXT DEFAULT '#666666',
-    usage_count     INTEGER DEFAULT 0
+    usage_count     INTEGER DEFAULT 0        -- 冗余字段，写操作后整体重算
 );
 
--- ==================== 文档-标签关联 ====================
 CREATE TABLE document_tags (
-    document_id     INTEGER NOT NULL,
-    tag_id          INTEGER NOT NULL,
-    PRIMARY KEY (document_id, tag_id),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    document_id     INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    tag_id          INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (document_id, tag_id)
 );
 
--- ==================== 文档切片 ====================
+-- ==================== 切片 ====================
 CREATE TABLE chunks (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id     INTEGER NOT NULL,
+    document_id     INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index     INTEGER NOT NULL,
     content         TEXT NOT NULL,
-    section_path    TEXT,                -- 章节路径：第一章 > 1.1
-    token_count     INTEGER DEFAULT 0,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    section_path    TEXT,                    -- 章节路径：第一章 > 1.1
+    token_count     INTEGER DEFAULT 0,       -- 实际存的是字符数
+    created_at      DATETIME
 );
 
-CREATE INDEX idx_chunks_doc ON chunks(document_id);
-
--- ==================== 对话会话 ====================
+-- ==================== 对话 ====================
 CREATE TABLE conversations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    title           TEXT,                -- 自动生成或用户自定义
-    document_id     INTEGER,             -- 关联文档（指定文档对话时）
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (document_id) REFERENCES documents(id)
+    title           TEXT,
+    mode            TEXT DEFAULT 'rag',      -- rag / direct / doc
+    document_id     INTEGER REFERENCES documents(id),
+    created_at      DATETIME,
+    updated_at      DATETIME
 );
 
-CREATE INDEX idx_conv_doc ON conversations(document_id);
-CREATE INDEX idx_conv_created ON conversations(created_at);
-
--- ==================== 对话消息 ====================
 CREATE TABLE messages (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id INTEGER NOT NULL,
-    role            TEXT NOT NULL,        -- user / assistant / system
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role            TEXT NOT NULL,           -- user / assistant
     content         TEXT NOT NULL,
-    sources         TEXT,                 -- JSON: 引用的文档来源
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    sources         TEXT,                    -- JSON：RAG 引用的片段
+    created_at      DATETIME
 );
 
-CREATE INDEX idx_msg_conv ON messages(conversation_id);
+-- ==================== 双向链接 ====================
+CREATE TABLE document_links (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_doc_id     INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    to_doc_id       INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    source          TEXT DEFAULT 'auto',     -- auto（标题匹配）/ syntax（[[标题]]）
+    created_at      DATETIME,
+    UNIQUE (from_doc_id, to_doc_id)
+);
 
--- ==================== 全文检索索引 ====================
+CREATE INDEX ix_document_links_from_doc_id ON document_links(from_doc_id);
+CREATE INDEX ix_document_links_to ON document_links(to_doc_id);
+
+-- ==================== 全文索引（trigram 分词，手工同步）====================
 CREATE VIRTUAL TABLE documents_fts USING fts5(
     title,
     content_md,
-    content='' UNINDEXED,
-    tokenize='unicode61'
+    tokenize='trigram'
 );
 ```
+
+> 除主键与 `document_links` 的索引外，其余表依赖 SQLite 的 rowid/唯一约束。
+> 个人库规模（千篇以内）足够；再大建议补 `documents(is_deleted, created_at)`、
+> `chunks(document_id)`、`messages(conversation_id)` 等索引。
 
 ### 4.2 sqlite-vec 向量存储
 
-sqlite-vec 以虚拟表形式嵌入 SQLite，不额外生成文件：
+与主库同一个文件，不额外生成数据库：
 
 ```sql
--- 向量表（sqlite-vec 虚拟表）
 CREATE VIRTUAL TABLE chunk_embeddings USING vec0(
-    embedding float[1536]  -- 维度取决于 Embedding 模型（text-embedding-3-small 是 1536）
+    rowid        INTEGER PRIMARY KEY,   -- 等于 chunks.id
+    document_id  INTEGER,               -- 便于按文档删除/统计
+    embedding    float[512]             -- 维度 = VECTOR_DIM，本地 BGE-small 默认 512
 );
 
--- 存储：每个 chunk 的 embedding
--- 检索：cosine 相似度 top-k
-SELECT chunk_id, distance
-FROM chunk_embeddings
-WHERE embedding MATCH ? ORDER BY distance LIMIT 5;
+-- 写入：rowid 即 chunk id
+INSERT INTO chunk_embeddings(rowid, document_id, embedding) VALUES (?, ?, ?);
+
+-- 检索：L2 距离升序
+SELECT rowid, document_id, distance FROM chunk_embeddings
+WHERE embedding MATCH ? ORDER BY distance LIMIT 20;
 ```
 
----
+维度必须与 `VECTOR_DIM` 一致：启动时会读取现有向量维度校验，不一致则重建向量表
+（需要再执行一次「重建索引」）。`vec0` 虚拟表只能用原生 `sqlite3` 连接创建，
+`aiosqlite` 的代理连接无法加载扩展。
 
 ## 五、API 设计
 
@@ -490,70 +503,91 @@ WHERE embedding MATCH ? ORDER BY distance LIMIT 5;
 { "code": 4001, "data": null, "msg": "文件格式不支持" }
 ```
 
-### 5.2 文档相关
+### 5.2 文档与索引
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/documents/upload | 上传文档（multipart/form-data） |
-| GET | /api/documents | 文档列表（分页、筛选） |
+| GET | /api/documents | 文档列表（分页、标题筛选） |
 | GET | /api/documents/{id} | 文档详情 |
-| GET | /api/documents/{id}/raw | 获取原始文件（下载） |
-| GET | /api/documents/{id}/preview | 获取 Markdown 内容 |
-| PUT | /api/documents/{id} | 更新文档（标题/Markdown 内容） |
+| GET | /api/documents/{id}/preview | Markdown 内容 |
+| GET | /api/documents/{id}/raw | 下载原始文件 |
+| PUT | /api/documents/{id} | 更新标题 / Markdown（后台重建索引） |
 | DELETE | /api/documents/{id} | 软删除 |
-| POST | /api/documents/{id}/restore | 恢复（从软删除） |
-| POST | /api/documents/{id}/reparse | 重新解析 + 重新向量化 |
-| GET | /api/documents/{id}/versions | 版本历史列表 |
-| GET | /api/documents/{id}/versions/{v_id} | 指定版本内容 |
-| POST | /api/documents/{id}/versions/{v_id}/restore | 回退到指定版本 |
+| POST | /api/documents/{id}/restore | 从软删除恢复 |
+| POST | /api/documents/batch-delete | 批量软删除 |
+| POST | /api/documents/{id}/reparse | 重新解析（需有原始文件） |
+| POST | /api/documents/{id}/reindex | 重建单篇向量索引 |
+| POST | /api/documents/reindex-all | 批量重建（**后台执行，立即返回**） |
+| POST | /api/documents/create-text | 在线新建 Markdown 文档 |
+| POST | /api/documents/clip | 网页剪藏（url 或 html） |
+| GET | /api/documents/{id}/links | 双向链接（outgoing / incoming） |
+| GET | /api/documents/{id}/versions | 版本历史 |
+| GET | /api/documents/{id}/versions/{v_id} | 版本内容 |
+| POST | /api/documents/{id}/versions/{v_id}/restore | 回滚到指定版本 |
 
-### 5.3 标签相关
+### 5.3 标签
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/tags | 所有标签 |
-| POST | /api/tags | 新建标签 |
-| PUT | /api/tags/{id} | 更新标签 |
+| GET | /api/tags | 所有标签（按使用次数排序） |
+| POST | /api/tags | 新建标签（空名/重名返回 400） |
+| PUT | /api/tags/{id} | 重命名 / 改色 |
 | DELETE | /api/tags/{id} | 删除标签 |
-| POST | /api/documents/{id}/tags | 给文档打标签 |
+| POST | /api/tags/document/{doc_id} | 给文档加标签（body 为标签名数组） |
+| DELETE | /api/tags/document/{doc_id}/{tag_id} | 移除标签 |
 
-### 5.4 搜索
+### 5.4 搜索与图谱
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/search?q=xxx | 全文搜索（FTS5），返回高亮片段 |
+| GET | /api/search?q=&page=&page_size= | 全文搜索，返回高亮片段与 rank |
+| GET | /api/graph | 图谱节点（含标签）与边（含来源类型） |
 
-### 5.5 AI 对话
+### 5.5 对话
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/conversations | 会话列表 |
-| POST | /api/conversations | 新建会话（可指定 document_id） |
-| GET | /api/conversations/{id} | 会话详情 + 消息历史 |
+| POST | /api/conversations | 新建会话（mode: rag/direct/doc） |
+| GET | /api/conversations/{id} | 会话详情 + 消息 |
+| PUT | /api/conversations/{id} | 修改标题 / 模式 |
 | DELETE | /api/conversations/{id} | 删除会话 |
-| POST | /api/chat | 发送消息（指定文档对话） |
-| POST | /api/chat/stream | 发送消息（SSE 流式，推荐） |
-| POST | /api/chat/rag | RAG 知识库问答（SSE 流式） |
+| GET | /api/conversations/{id}/export | 导出为 Markdown |
+| POST | /api/conversations/{id}/regenerate/{msg_id} | 重新生成某条回答 |
+| POST | /api/chat/direct | 纯 AI 对话（SSE） |
+| POST | /api/chat/stream | 指定文档问答（SSE） |
+| POST | /api/chat/rag | 知识库 RAG 问答（SSE） |
 
-### 5.6 对话请求体示例
+### 5.6 系统
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET / PUT | /api/settings | 读取 / 写入配置（写 .env 并热更新） |
+| POST | /api/backup | 立即备份 |
+| GET | /api/backups | 备份列表 |
+| DELETE | /api/backups/{name} | 删除备份 |
+| GET | /api/trash | 回收站列表 |
+| POST | /api/trash/{id}/restore | 恢复 |
+| DELETE | /api/trash/{id} | 彻底删除（含文件、向量、版本） |
+| POST | /api/trash/batch-restore | 批量恢复 |
+| POST | /api/trash/batch-purge | 批量彻底删除 |
+| GET | /api/stats/overview | 概览统计 |
+| POST | /api/stats/test-llm | AI 连通性测试 |
+| GET | /api/health | 健康检查 |
+
+### 5.7 对话请求体示例
 
 ```json
 // 指定文档对话
-{
-  "conversation_id": 1,
-  "document_id": 42,
-  "message": "这篇文档的核心观点是什么？"
-}
+{ "conversation_id": 1, "document_id": 42, "message": "这篇文档的核心观点是什么？" }
 
 // RAG 知识库问答
-{
-  "conversation_id": null,
-  "message": "FastAPI 和 Flask 有什么区别？",
-  "top_k": 5
-}
-```
+{ "conversation_id": null, "message": "FastAPI 和 Flask 有什么区别？", "top_k": 5 }
 
----
+// 纯 AI 对话
+{ "conversation_id": 3, "message": "帮我写个正则" }
+```
 
 ## 六、配置说明
 
@@ -602,47 +636,58 @@ VECTOR_DIM=1024
 
 ## 七、迭代计划
 
-### 第一阶段：能存能看
+### 第一阶段：能存能看 ✅
 
-- [ ] FastAPI 项目初始化
-- [ ] SQLite + sqlite-vec + FTS5 建表
-- [ ] 文件上传 + 双版本存储
-- [ ] 基础解析器（先支持 Markdown / PDF）
-- [ ] 文档列表 + 查看页面
-- [ ] 软删除
+- [x] FastAPI 项目初始化
+- [x] SQLite + sqlite-vec + FTS5 建表
+- [x] 文件上传 + 双版本存储
+- [x] 解析器（Markdown / TXT / PDF / Word / HTML）
+- [x] 文档列表 + 查看页面
+- [x] 软删除
 
-### 第二阶段：AI 对话
+### 第二阶段：AI 对话 ✅
 
-- [ ] Embedding + 向量化（异步）
-- [ ] sqlite-vec 相似度检索
-- [ ] 指定文档对话（SSE 流式）
-- [ ] RAG 知识库问答（SSE 流式 + 引用来源）
-- [ ] 多轮对话 + 会话管理
+- [x] Embedding + 向量化（后台）
+- [x] sqlite-vec 相似度检索
+- [x] 指定文档对话（SSE 流式）
+- [x] RAG 知识库问答（SSE + 引用来源）
+- [x] 多轮对话 + 会话管理（含导出、重新生成）
 
-### 第三阶段：好用
+### 第三阶段：好用 ✅
 
-- [ ] 全文搜索 + 高亮
-- [ ] 标签系统
-- [ ] 版本历史 + 手动编辑
-- [ ] 自动备份
-- [ ] AI 自动摘要
-- [ ] 解析插件补全（Word / HTML）
-- [ ] 异步解析状态轮询 / WebSocket
+- [x] 全文搜索（trigram + 高亮 + 分页）
+- [x] 标签系统（自动配色 + AI 自动打标签）
+- [x] 版本历史 + 手动编辑 + 回滚（保留 30 份）
+- [x] 自动备份（启动 + 手动）
+- [x] AI 自动摘要
+- [x] 双向链接 + 知识图谱
+- [x] 网页剪藏（正文提取 + 图片本地化）
+- [x] 仪表盘统计
 
----
+### 第四阶段：稳定性与开源 ✅
+
+- [x] 修复链接重建死锁（threading.Lock → 事件循环锁）
+- [x] 修复并发保存导致的向量索引丢失（按文档串行化）
+- [x] 索引/统计/标签计数一致性收敛
+- [x] 搜索分页、连字符查询、LIKE 通配符转义
+- [x] 单元测试 + GitHub Actions
+- [ ] 全文 + 向量混合排序（RRF）
+- [ ] 移动端适配
 
 ## 八、风险与应对
 
 | 风险 | 影响 | 应对 |
 |------|------|------|
-| PDF 解析质量差 | AI 读取内容不完整 | 标记 parse_status=partial，允许手动修正 Markdown |
-| LLM 上下文超限 | 长文档问答失败 | 切片 + 检索相关片段再传入，不全量传 |
-| Embedding 模型切换 | 向量维度不兼容 | 重建向量表时清空旧数据，重新向量化 |
-| 文件上传安全 | 路径穿越 / 恶意文件 | 白名单校验 + uuid 重命名 + 存前检测 MIME |
-| 数据丢失 | 灾难性 | 每日自动备份 + 软删除 + 版本历史 |
-| API Key 泄露 | 费用风险 | .env 管理 + 加入 .gitignore + 启动时日志脱敏 |
-
----
+| PDF 是扫描件 | 无法提取文本 | 标记 `parse_status=failed`，允许手动补 Markdown |
+| LLM 上下文超限 | 长文档问答不完整 | 超过 12000 字的文档改为库内切片检索，只送最相关片段 |
+| Embedding 模型切换 | 维度不兼容 | 启动校验维度并重建向量表，再执行「重建索引」 |
+| 并发保存 | 索引错乱/丢失 | 按文档串行化索引写入 + 版本快照 |
+| 并发重建链接 | 事件循环死锁 | 事件循环锁 + 请求合并 |
+| 本地模型不可用 | 语义检索失效 | 启动预热有超时；失败时降级为关键词匹配 |
+| 文件上传 | 路径穿越 / 恶意文件 | 扩展名白名单 + uuid 重命名 + 大小限制 |
+| 数据丢失 | 灾难性 | 启动自动备份 + 软删除 + 版本历史 |
+| 局域网暴露 | 无鉴权可被读写 | 默认只监听 127.0.0.1；CORS 收紧到本地前端 |
+| API Key 泄露 | 费用风险 | `.env` 管理且已被 `.gitignore` 忽略 |
 
 ## 九、更新记录
 
@@ -724,3 +769,21 @@ VECTOR_DIM=1024
 - **标签自动配色**：CSS 定义 8 组亮/暗双主题标签色变量；`utils/tagColor.js` 按标签名哈希稳定取色（同一标签全站颜色一致）；文档列表/卡片/查看器的标签自动配色，暗色模式自动切换变体
 - **AI 自动打标签**：`services/autotag.py` —— LLM 根据内容生成 1-5 个标签（过滤宽泛词），文档已有标签时跳过（尊重手动），复用/创建 Tag 并更新 usage_count；随 `_bg_summarize` 在上传/新建/剪藏/编辑/回滚后后台触发
 - 文档查看器新增标签展示区
+
+### v1.7（稳定性加固 + 开源准备）
+
+**修复**
+- 链接重建死锁：`threading.Lock` 跨 `await` 持有会阻塞事件循环，改为按事件循环取 `asyncio.Lock`（`utils/loop_lock.py`）
+- 并发保存导致向量索引静默丢失：两个重建任务交错删除/插入 chunk，SQLite 复用 rowid 撞 `chunk_embeddings` 主键；改为按 `doc_id` 串行化
+- 软删除不再删除向量，恢复文档后可立即被 RAG 检索；历史缺向量的文档恢复时自动补建
+- 标签计数只增不减：新增 `services/tags_usage.py`，写操作后统一重算
+- 标签重名导致 500、空标签名可创建：改为 400 并统一 `strip()`
+- 搜索：连字符查询拆词、`%`/`_` 转义、结果分页、相关度归一化（原公式恒 >100%）
+- `reindex-all` 改为后台执行；版本历史裁剪到 30 份；`reparse` 失败时正确落库 `failed`
+- 索引不再覆盖 `failed/partial` 解析状态
+- 搜索结果 snippet 接入 DOMPurify（原为裸 `v-html`）
+
+**架构**
+- 链接重建支持按文档增量 + 请求合并，正文编辑不再触发全表扫描
+- CORS 改为按路径放行：仅本地前端，剪藏接口保留任意来源（书签小工具）
+- 新增 `tests/`（10 个纯函数用例）与 GitHub Actions
